@@ -37,6 +37,14 @@ typedef C_StdIO::File* FilePointer;
 static const String _ErrMsg_alreadyClosedFile =
     "file must be open before close";
 
+/** error message for bad position in byte list when writing */
+static const String _ErrMsg_badListPosition =
+    "bad starting index in byte list";
+
+/** error message for bad count for byte list when writing */
+static const String _ErrMsg_badElementCount =
+    "bad element count for byte list";
+
 /** error message for closed file when reading */
 static const String _ErrMsg_fileClosedWhenReading =
     "file must be open for reading";
@@ -50,7 +58,7 @@ static const String _ErrMsg_fileClosedWhenWriting =
 /*--------------------*/
 
 File::File ()
-    : _descriptor{NULL}
+    : _descriptor{nullptr}
 {
 }
 
@@ -73,7 +81,7 @@ Boolean File::open (IN String& fileName, IN String& mode)
                   STR::expand("file mode must be known - %1", mode));
     FilePointer file = C_StdIO::fopen(fileName.c_str(), mode.c_str());
     _descriptor = file;
-    Boolean result = (file != NULL);
+    Boolean result = (file != nullptr);
     return result;
 }
 
@@ -84,7 +92,7 @@ void File::close ()
     Assertion_pre(isOpen(), _ErrMsg_alreadyClosedFile);
     FilePointer file = static_cast<FilePointer>(_descriptor);
     C_StdIO::fclose(file);
-    _descriptor = NULL;
+    _descriptor = nullptr;
 }
 
 /*--------------------*/
@@ -152,6 +160,8 @@ Natural File::write (IN ByteList& byteList,
                      IN Natural count)
 {
     Assertion_pre(isOpen(), _ErrMsg_fileClosedWhenWriting);
+    Assertion_pre(position <= byteList.length(), _ErrMsg_badListPosition);
+    Assertion_pre(count <= byteList.length() - position, _ErrMsg_badElementCount);
     FilePointer file = static_cast<FilePointer>(_descriptor);
     const char* characterArray =
         reinterpret_cast<const char*>(byteList.asArray());
@@ -178,7 +188,7 @@ Natural File::length (IN String& fileName)
     Natural result = 0;
     FilePointer file = C_StdIO::fopen(fileName.c_str(), "rb");
 
-    if (file != NULL) {
+    if (file != nullptr) {
         C_StdIO::fseek(file, 0, SEEK_END);
         result = size_t(C_StdIO::ftell(file));
         C_StdIO::fclose(file);
@@ -193,7 +203,7 @@ Natural File::length (IN String& fileName)
 
 Boolean File::isOpen () const
 {
-    return _descriptor != NULL;
+    return _descriptor != nullptr;
 }
 
 /*--------------------*/

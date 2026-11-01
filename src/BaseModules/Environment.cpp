@@ -79,7 +79,7 @@ Dictionary Environment::all ()
     const String entrySeparator = "§§§";
     String st;
 
-    while (*ptr != NULL) {
+    while (*ptr != nullptr) {
         st = (st
               + (st == "" ? "" : entrySeparator)
               + String{*ptr++});
@@ -118,7 +118,7 @@ String Environment::expand (IN String& st)
                            variableNamePosition, variableNameLength);
         char* variableValue = std::getenv(variableName.c_str());
 
-        if (variableValue == NULL) {
+        if (variableValue == nullptr) {
             /* start search one position further... */
             leadInPosition++;
         } else {
@@ -176,7 +176,7 @@ String Environment::value (IN String& variableName,
     char* value = std::getenv(variableName.c_str());
     String result;
 
-    if (value == NULL) {
+    if (value == nullptr) {
         result = defaultValue;
     } else {
         result = String(value);

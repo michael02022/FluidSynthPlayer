@@ -254,6 +254,20 @@ namespace BaseTypes::GenericTypes {
         /*--------------------*/
 
         /**
+         * Removes all entries for elements in <C>keyList</C>.
+         *
+         * @param[in] keyList  list of map keys
+         */
+        void remove (IN _KeyList& keyList)
+        {
+            for (const KeyType& key : keyList) {
+                remove(key);
+            }
+        }
+
+        /*--------------------*/
+
+        /**
          * Sets entry for <C>key</C> to <C>value</C>.
          *
          * @param[in] key    key within map
@@ -262,6 +276,20 @@ namespace BaseTypes::GenericTypes {
         void set (IN KeyType& key, IN ValueType& value)
         {
             _UnderlyingMap::insert_or_assign(key, value);
+        }
+
+        /*--------------------*/
+
+        /**
+         * Adds all entries from <C>otherMap</C> to current map.
+         *
+         * @param[in] otherMap    map to be added to current
+         */
+        void append (IN GenericMap& otherMap)
+        {
+            for (const KeyType& key : otherMap.keyList()) {
+                set(key, otherMap.at(key));
+            }
         }
 
     };

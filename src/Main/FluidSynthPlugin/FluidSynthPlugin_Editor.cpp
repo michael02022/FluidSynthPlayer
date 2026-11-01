@@ -724,14 +724,14 @@ juce::Rectangle<int> _subArea (IN juce::Rectangle<int> rectangle,
 {
     juce::Rectangle<int> result;
     const Percentage xIndent{5.0};
-    Natural width{(size_t) rectangle.getWidth()};
-    const Natural x = xIndent.of(width) + (size_t) rectangle.getX();
+    Natural width{size_t(rectangle.getWidth())};
+    const Natural x = xIndent.of(width) + size_t(rectangle.getX());
     const Percentage widthPercentage{90.0};
     width = widthPercentage.of(width);
-    Natural height{(size_t) rectangle.getHeight()};
-    const Natural y = startY.of(height) + (size_t) rectangle.getY();
+    Natural height{size_t(rectangle.getHeight())};
+    const Natural y = startY.of(height) + size_t(rectangle.getY());
     height = endY.of(height) - startY.of(height);
-    result.setBounds((int) x, (int) y, (int) width, (int) height);
+    result.setBounds(int(x), int(y), int(width), int(height));
     return result;
 }
 
@@ -800,7 +800,7 @@ bool FluidSynthPlugin_Editor::isInterestedInFileDrag
     }
 
     Logging_trace1("<<: %1", TOSTRING(result));
-    return (bool) result;
+    return bool(result);
 }
 
 /*--------------------*/

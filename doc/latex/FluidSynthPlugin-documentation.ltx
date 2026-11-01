@@ -18,6 +18,18 @@
     \usepackage{microtype}  % for better justification, requires later
                             % engine of LaTeX like e.g. pdflatex
 
+    %----------------------
+    %-- VERSION AND DATE --
+    %----------------------
+
+    \newcommand{\releaseDate}{2026-10-29}
+    \newcommand{\releaseVersion}{0.8.0}
+    \newcommand{\releasePlatforms}{
+                Platforms:&VST3 on Windows~x64,\\
+                                 &VST3 \& AU on MacOSX (x86\_64)\\
+                                 &VST3 on Linux (x86\_64)\\
+    }
+
     %------------
     %-- TITLES --
     %------------
@@ -43,10 +55,10 @@
     \fancyhead[RO]{\slshape \leftmark}
     %--
     \fancyfoot[LE]{\thepage}
-    \fancyfoot[CE]{v\programVersion}
-    \fancyfoot[RE]{Dr.~Thomas Tensi}
-    \fancyfoot[LO]{FluidSynth Plugin and Pedantic Command Line Processor}
-    \fancyfoot[CO]{~}
+    \fancyfoot[CE]{~}
+    \fancyfoot[RE]{FluidSynth Plugin and Pedantic Command Line Processor}
+    \fancyfoot[LO]{Dr.~Thomas Tensi}
+    \fancyfoot[CO]{v\releaseVersion}
     \fancyfoot[RO]{\thepage}
 
     %---------------------------------
@@ -122,7 +134,7 @@
 
     \newenvironment{parameterTableA}
                    {\begin{center}\footnotesize
-                      \begin{tabular}{|>{\tt}p{5cm}|p{7cm}|c|}
+                      \begin{tabular}{|>{\tt}p{5cm}|p{7cm}|p{2.5cm}|}
                         \hline \parameterTableAHeader \hline
                    }
                    {  \end{tabular}
@@ -208,8 +220,6 @@
         \productName{Pedantic\-Fluid\-Synth\-Converter}%
     }
 
-    \newcommand{\programVersion}{0.7.8}
-
     \newcommand{\settingsCaption}[1]{%
         Common Synthesizer Settings for \FluidSynthPlugin\ and
         \FluidSynthConverter\ (Part~#1)%
@@ -230,11 +240,9 @@
   \large
   \begin{tabular}{>{\bf}p{2.5cm}p{10.5cm}}
       Author:&Dr.~Thomas Tensi\\
-      Date:&2025-08-24\\
-      Version:&\programVersion\\
-      Platforms:&VST3 on Windows~x64,\\
-                &VST3/AU on MacOS (x86\_64, ARM64)\\
-                &VST3 on Linux (x86\_64)\\
+      Date:&\releaseDate\\
+      Version:&\releaseVersion\\
+      \releasePlatforms
   \end{tabular}
   \vfill
 \end{titlepage}
@@ -485,8 +493,9 @@ are omitted: those do not make any sense in the context of these
 programs.
 
 The supported settings are shown in
-figures~\ref{figure:allowedSettingsA}, \ref{figure:allowedSettingsB}
-and~\ref{figure:allowedSettingsC} (with short explanations taken from
+figures~\ref{figure:allowedSettingsA}, \ref{figure:allowedSettingsB},
+\ref{figure:allowedSettingsC} and~\ref{figure:allowedSettingsD} (with
+short explanations taken from
 from~\cite{reference:fsSettingsDocumentation}).
     
 \begin{centeredFigure}
@@ -530,6 +539,30 @@ from~\cite{reference:fsSettingsDocumentation}).
                             {gain applied to the final or master output
                              of the synthesizer}
                             {float}
+        \parameterTableALine{synth.limiter.active}
+                            {tells whether the limiter will be added
+                             to the end of the rendering line}
+                            {boolean}
+        \parameterTableALine{synth.limiter.attack}
+                            {the limiter attack time in milliseconds}
+                            {float}
+        \parameterTableALine{synth.limiter.hold}
+                            {the limiter hold time in milliseconds}
+                            {float}
+        \parameterTableALine{synth.limiter.link-channels}
+                            {the amount of linkage by
+                             the limiter between the different channels}
+                            {float \(\in 0\dots 1\)}
+        \parameterTableALine{synth.limiter.output-limit}
+                            {the audio output level of the limiter}
+                            {float}
+        \parameterTableALine{synth.limiter.release}
+                            {the limiter release time in milliseconds}
+                            {float}
+        \parameterTableALine{synth.limiter.smoothing-stages}
+                            {the number of smoothing stages in the
+                             limiter}
+                            {integer (1, 2, 3)}
         \parameterTableALine{synth.midi-bank-select}
                             {defines how the synthesizer interprets
                              bank select messages}
@@ -538,6 +571,13 @@ from~\cite{reference:fsSettingsDocumentation}).
                             {sets the minimum note duration in
                              milliseconds}
                             {integer}
+    \end{parameterTableA}
+  \caption{\settingsCaption{2}}
+  \label{figure:allowedSettingsB}
+\end{centeredFigure}
+
+\begin{centeredFigure}
+    \begin{parameterTableA}
         \parameterTableALine{synth.overflow.age}
                             {tells how event age is accounted for in
                              a voice overflow situation}
@@ -570,8 +610,8 @@ from~\cite{reference:fsSettingsDocumentation}).
                              based on their current volume}
                             {float}
     \end{parameterTableA}
-  \caption{\settingsCaption{2}}
-  \label{figure:allowedSettingsB}
+  \caption{\settingsCaption{3}}
+  \label{figure:allowedSettingsC}
 \end{centeredFigure}
 
 \begin{centeredFigure}
@@ -580,6 +620,10 @@ from~\cite{reference:fsSettingsDocumentation}).
                             {defines how many voices can be played in
                              parallel}
                             {integer}
+        \parameterTableALine{synth.portamento-time}
+                            {defines the handling of the portamento
+                             time CC}
+                            {string (auto, linear, xg-gs)}
         \parameterTableALine{synth.reverb.active}
                             {tells whether reverb will be added to the
                              output signal}
@@ -587,6 +631,9 @@ from~\cite{reference:fsSettingsDocumentation}).
         \parameterTableALine{synth.reverb.damp}
                             {sets the amount of reverb damping}
                             {float}
+        \parameterTableALine{synth.reverb.engine}
+                            {sets the engine for the reverb effect}
+                            {string (fdn, free, lex, dat, smith)}
         \parameterTableALine{synth.reverb.level}
                             {sets the reverb output amplitude}
                             {float}
@@ -611,8 +658,8 @@ from~\cite{reference:fsSettingsDocumentation}).
                              to stdout}
                             {boolean}
     \end{parameterTableA}
-  \caption{\settingsCaption{3}}
-  \label{figure:allowedSettingsC}
+  \caption{\settingsCaption{4}}
+  \label{figure:allowedSettingsD}
 \end{centeredFigure}
 
 Besides the standard settings from \FluidSynth\ there are three
@@ -638,12 +685,16 @@ special settings available: \embeddedCode{preset}
                             {sets synthesis interpolation method on
                              all MIDI channels: the variants are
                              \embeddedCode{0} for no interpolation,
-                             \embeddedCode{1} for straight-line
-                             interpolation, \embeddedCode{4} for
-                             fourth-order interpolation and
-                             \embeddedCode{7} for seventh-order
-                             interpolation}
-                            {integer (0, 1, 4, 7)}
+                             \embeddedCode{1} for linear interpolation,
+                             \embeddedCode{4} for fourth-order interpolation,
+                             \embeddedCode{5} for 11th-order sinc,
+                             \embeddedCode{6} for 17th-order sinc,  and
+                             \embeddedCode{7} for 25th-order sinc;
+                             when a pair of values is specified
+                             (separated by semicolon) the first value
+                             is for realtime rendering, the second
+                             value for non-realtime rendering}
+                            {integer or int.\ pair (0, 1, 4, 5, 6, 7)}
     \end{parameterTableA}
     \caption{Additional Settings in \FluidSynthPlugin\ and
         \FluidSynthConverter}
@@ -1614,8 +1665,8 @@ and the libraries
          mesa-common-dev
 \end{itemize}
 
-Also have a look at
-\hyperlink{https://github.com/juce-framework/JUCE/blob/master/docs/Linux\%20Dependencies.md}
+Also have a look at\hfill\break
+\hyperlink{https://github.com/juce-framework/JUCE/blob/master/docs/Linux\%20Dependencies.md}\break
 for a current list of package dependencies by the JUCE team.
 
 \end{document}

@@ -83,7 +83,7 @@ static Byte _readByte (IN ByteList& byteList,
                        INOUT Natural& position)
 {
     Natural result = _readNatural(byteList, position, 1);
-    return Byte{(int) result};
+    return Byte{int(result)};
 }
 
 /*--------------------*/
@@ -144,7 +144,7 @@ static Natural _readNatural (IN ByteList& byteList,
                              IN Natural byteCount)
 {
     Integer i = _readInteger(byteList, position, byteCount, false);
-    return Natural{(size_t) i};
+    return Natural{size_t(i)};
 }
 
 /*--------------------*/
@@ -358,7 +358,7 @@ static String _readString (IN ByteList& byteList,
     String result;
 
     for (Natural i = 0;  i < byteCount;  i++) {
-        result += (char) byteList[position];
+        result += char(byteList[position]);
         position++;
     }
 

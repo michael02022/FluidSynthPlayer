@@ -170,6 +170,7 @@ SET(srcAudioModulesFileList
 )
 
 SET(srcBaseModulesFileList
+    ${srcBaseModulesDirectory}/Configuration.cpp
     ${srcBaseModulesDirectory}/Environment.cpp
     ${srcBaseModulesDirectory}/File.cpp
     ${srcBaseModulesDirectory}/LoggingSupport.cpp

@@ -128,7 +128,7 @@ struct _EventTime {
              (Real{midiEventTime - previousTime.midiTime}
               * midiTimeToSecondsFactor));
         Integer eventTimeInDataPoints =
-            (Integer) Real::round(eventTimeInSeconds * dataPointRate);
+            Integer(Real::round(eventTimeInSeconds * dataPointRate));
         _EventTime result{midiEventTime, eventTimeInSeconds,
                           eventTimeInDataPoints};
 
@@ -423,7 +423,7 @@ _handleCommandLineArguments (IN Natural argumentCount,
     StringList argumentList;
 
     for (Natural i = 0;  i < argumentCount;  i++) {
-        argumentList.append(argv[(size_t) i]);
+        argumentList.append(argv[size_t(i)]);
     }
 
     CommandLineArgumentHandler optionHandler;
@@ -570,7 +570,7 @@ _handleCommandLineArguments (IN Natural argumentCount,
  *
  * @param[in] settings   dictionary of render settings (including e.g.
  *                       the sound font name)
- * @return  newly constructed midi event converter or NULL on failure
+ * @return  newly constructed midi event converter or nullptr on failure
  */
 static MidiEventConverter* 
 _makeMidiEventConverter (IN Dictionary& settings)
@@ -584,7 +584,7 @@ _makeMidiEventConverter (IN Dictionary& settings)
     if (!isOkay) {
         _writeMessage("cannot open FluidSynth library");
         delete midiEventConverter;
-        midiEventConverter = NULL;
+        midiEventConverter = nullptr;
     } else {
         for (auto& [key, value] : settings) {
             Boolean settingIsOkay =
@@ -663,7 +663,7 @@ static void _process (IN Dictionary& renderSettings,
                     STR::expand("bad type code for '%1' - '%2'",
                                 audioFileFormat, typeCodeAndWidth));
     const Natural dataPointWidthInBytes = StringUtil::toNatural(dataPointWidth);
-    destinationFile.write((Natural) Real::round(dataPointRate), _channelCount, 
+    destinationFile.write(Natural(Real::round(dataPointRate)), _channelCount, 
                           audioFrameCount, typeCode, dataPointWidthInBytes,
                           buffer);
 
@@ -706,13 +706,13 @@ static void _renderEvents (IN Dictionary& settings,
     MidiEventConverter* midiEventConverter =
         _makeMidiEventConverter(settings);
 
-    if (midiEventConverter != NULL) {
+    if (midiEventConverter != nullptr) {
         const Natural tempBufferSize = 2048;
         const Real defaultBpmRate = 120.0;
 
         AudioDataPointListVector tempBuffer{_channelCount};
         tempBuffer.setFrameCount(tempBufferSize);
-        midiEventConverter->prepareToPlay(dataPointRate, tempBufferSize);
+        midiEventConverter->prepareToPlay(dataPointRate, tempBufferSize, false);
         Real midiTimeToSecondsFactor =
             Real{60.0} / (defaultBpmRate * midiTicksPerQuarterNote);
         Logging_trace1("--: midiTimeToSecondsFactor = %1",
@@ -864,10 +864,10 @@ Real _updatedTimeFactor (IN MidiEvent& event,
     Assertion_check(eventData.length() == 5,
                     "tempo event must have length 5");
     Natural microsecondsPerQuarterNote =
-        (((Natural) eventData[2] * 256 + (Natural) eventData[3]) * 256
-         + (Natural) eventData[4]);
+        ((Natural(eventData[2]) * 256 + Natural(eventData[3])) * 256
+         + Natural(eventData[4]));
     Real result = (Real{microsecondsPerQuarterNote}
-                         / (1.0E6 * (size_t) midiTicksPerQuarterNote));
+                         / (1.0E6 * size_t(midiTicksPerQuarterNote)));
 
     Logging_trace1("<<: %1", TOSTRING(result));
     return result;

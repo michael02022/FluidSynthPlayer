@@ -149,6 +149,17 @@ namespace MIDI {
         /*--------------------*/
 
         /**
+         * Returns the default mapping from keys to values for the
+         * fluidsynth settings.
+         *
+         * @return  map of default values for all keys relevant for
+         *          initialization
+         */
+        static const Dictionary& settingsKeyToDefaultValueMap ();
+        
+        /*--------------------*/
+
+        /**
          * Returns name of currently loaded SoundFont
          *
          * @return  SoundFont name
@@ -212,9 +223,14 @@ namespace MIDI {
          * @param[in] maximumExpectedDataPointsPerBlock  the number of
          *                                               data points per
          *                                               processing call 
+         * @param[in] isRealtime                         tells whether
+         *                                               the calling
+         *                                               processor works
+         *                                               in realtime
          */
         void prepareToPlay (IN Real dataPointRate,
-                            IN Natural maximumExpectedDataPointsPerBlock);
+                            IN Natural maximumExpectedDataPointsPerBlock,
+                            IN Boolean isRealtime);
 
         /*--------------------*/
 
@@ -229,16 +245,14 @@ namespace MIDI {
          * Processes a list of MIDI events with this converter and
          * updates audio data point buffer assuming a stereo setup.
          *
-         * @param[in]    midiEventList            list of MIDI messages
-         *                                        to be processed
-         * @param[inout] audioBuffer              vector of data point
-         *                                        lists
-         * @param[in]    dataPointCountInChannel  relevant count of data
-         *                                        points per channel
+         * @param[in]    midiEventList  list of MIDI messages to be
+         *                              processed
+         * @param[inout] audioBuffer    vector of data point lists
+         * @param[in]    frameCount     relevant count of data frames
          */
         void processBlock (IN MidiEventList& midiEventList,
                            INOUT AudioDataPointListVector& audioBuffer,
-                           IN Natural dataPointCountInChannel);
+                           IN Natural frameCount);
 
         /*--------------------*/
 

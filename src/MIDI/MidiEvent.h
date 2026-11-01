@@ -125,7 +125,7 @@ namespace MIDI {
          */
         friend Boolean operator == (IN MidiEventKind& self,
                                     IN MidiEventKind& other);
-        
+
         /*--------------------*/
 
         /**
@@ -137,7 +137,7 @@ namespace MIDI {
          */
         friend Boolean operator != (IN MidiEventKind& self,
                                     IN MidiEventKind& other);
-        
+
         /*--------------------*/
 
         private:

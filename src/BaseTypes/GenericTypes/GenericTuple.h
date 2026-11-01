@@ -17,6 +17,8 @@
 /*=========*/
 
 #include <array>
+#include <numeric>
+
 #include "ElementToStringProc.h"
 #include "Integer.h"
 #include "StringProc.h"
@@ -154,7 +156,7 @@ namespace BaseTypes::GenericTypes {
          * @param[in] position  index position
          * @param[in] value     new value at position
          */
-        void set (IN Natural position, IN ElementType value)
+        void set (IN Natural position, IN ElementType& value)
         {
             at(position) = value;
         }
@@ -210,6 +212,28 @@ namespace BaseTypes::GenericTypes {
         {
             return Natural{elementCount};
         }
+        
+        /*--------------------*/
+        /* iteration          */
+        /*--------------------*/
+
+        /**
+         * Accumulates data using binary function <C>op</C> across the
+         * elements of current tuple with <C>startValue</C> and
+         * returns accumulated result.
+         *
+         * @param[in]  startValue  start value
+         * @param[in]  op          binary operation combining intermediate
+         *                         value with transformed tuple element
+         * @return  accumulated result
+         */
+        template <typename ResultType, typename BinaryOp>
+        ResultType accumulate (IN ResultType startValue,
+                               IN BinaryOp op) const
+        {
+                return std::accumulate(this->cbegin(),
+                                       this->cend(), startValue, op);
+        }       
         
     };
 

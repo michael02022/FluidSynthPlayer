@@ -11,6 +11,12 @@
 
 #pragma once
 
+/*=========*/
+/* IMPORTS */
+/*=========*/
+
+#include "Assertion.h"
+
 /*====================*/
 
 namespace BaseTypes::Primitives {
@@ -34,5 +40,6 @@ namespace BaseTypes::Primitives {
 template <typename Type>
 Type& TOREFERENCE (BaseTypes::Primitives::Object object)
 {
-    return *(reinterpret_cast<Type*>(object));
+    Assertion_pre(object != nullptr, "object reference must not be NULL");
+    return *(static_cast<Type*>(object));
 }

@@ -28,14 +28,17 @@ typedef std::logic_error AssertionError;
 /**
  * Checks the <C>condition</C> and exits with <C>message</C> on
  * failure; this is the base routine called by the exported assertion
- * checks --> the DEBUG version does the checking, the RELEASE version
+ * checks: the DEBUG version does the checking, the RELEASE version
  * does nothing.
  *
  * @param condition  condition to be checked
  * @param message    message to be given in case of failure
  */
 #define _ASSERT_WITH_MESSAGE(condition, prefix, message) \
-    if (!(condition)) { throw AssertionError{std::string(prefix ": ") + std::string(message)}; }
+    if (!(condition)) { \
+        throw AssertionError{std::string(prefix ": ") \
+                             + std::string(message)}; \
+    }
 
 /*--------------------*/
 

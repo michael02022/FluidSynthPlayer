@@ -401,11 +401,11 @@ _highlightMarkedRowInListBox (INOUT juce::ListBox& listBoxWidget,
         }
     }
 
-    listBoxWidget.scrollToEnsureRowIsOnscreen((int) row);
+    listBoxWidget.scrollToEnsureRowIsOnscreen(int(row));
 
     if (markedItemIsFound
         && listBoxModel.name() == _Identification_bank) {
-        listBoxWidget.selectRow((int) row);
+        listBoxWidget.selectRow(int(row));
     }
 
     Logging_trace("<<");
@@ -576,8 +576,8 @@ static int _toDeviceHeight (IN juce::Component* component,
                             IN Percentage height)
 {
     juce::Rectangle<int> rectangle = component->getLocalBounds();
-    Natural rectangleHeight{(size_t) rectangle.getHeight()};
-    const int result = (double) height.of(rectangleHeight);
+    Natural rectangleHeight{size_t(rectangle.getHeight())};
+    const int result = double(height.of(rectangleHeight));
     return result;
 }
 
@@ -607,12 +607,12 @@ juce::Rectangle<int> _toDeviceRectangle (IN juce::Component* component,
                                          IN Percentage height)
 {
     juce::Rectangle<int> rectangle = component->getLocalBounds();
-    Natural rectangleHeight{(size_t) rectangle.getHeight()};
-    Natural rectangleWidth{(size_t) rectangle.getWidth()};
-    const int deviceX = (double) startX.of(rectangleWidth);
-    const int deviceY = (double) startY.of(rectangleHeight);
-    const int deviceWidth = (double) width.of(rectangleWidth);
-    const int deviceHeight = (double) height.of(rectangleHeight);
+    Natural rectangleHeight{size_t(rectangle.getHeight())};
+    Natural rectangleWidth{size_t(rectangle.getWidth())};
+    const int deviceX = double(startX.of(rectangleWidth));
+    const int deviceY = double(startY.of(rectangleHeight));
+    const int deviceWidth = double(width.of(rectangleWidth));
+    const int deviceHeight = double(height.of(rectangleHeight));
 
     juce::Rectangle<int> result{deviceX, deviceY,
                                 deviceWidth, deviceHeight};
@@ -735,7 +735,7 @@ void _PresetSelectionComponent::buttonClicked (juce::Button* button)
     }
 
     juce::DialogWindow* dialog{(juce::DialogWindow*) getParentComponent()};
-    dialog->exitModalState((int) isCancelled);
+    dialog->exitModalState(int(isCancelled));
 
     Logging_trace("<<");
 }
@@ -774,7 +774,7 @@ _PresetSelectionComponent::handleListBoxSelection (IN String& listBoxName,
          * marked bank*/
         int bankRow = _bankListBoxWidget.getSelectedRow();
         bankRow = (bankRow < 0 ? 0 : bankRow);
-        markedBankNumber = _bankNumberList.at((size_t) bankRow);
+        markedBankNumber = _bankNumberList.at(size_t(bankRow));
         _bankNumberListModel.setMarkedItem(markedBankNumber);
         String st = _programListModel.list().at(selectedIndex);
         markedProgramNumber = _splitOffLeadingNumber(st);
@@ -925,7 +925,7 @@ _StringListBoxModel::_StringListBoxModel
 
 int _StringListBoxModel::getNumRows ()
 {
-    return (int) _list.length();
+    return int(_list.length());
 }
 
 /*--------------------*/
@@ -1101,7 +1101,7 @@ Boolean FluidSynthPlugin_EditorSupport::selectPresetByDialog
 
     juce::DialogWindow::showModalDialog(_Title_presetSelection,
                                         &presetSelector,
-                                        NULL,
+                                        nullptr,
                                         _Colour_presetSelectionComponentBkg,
                                         false, true, true);
     

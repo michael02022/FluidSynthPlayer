@@ -96,10 +96,33 @@ namespace BaseTypes::Containers {
          * @return  string representation
          */
         static String toString (IN StringList& list);
-
         
         /*--------------------*/
         /* functions          */
+        /*--------------------*/
+
+        /**
+         * Returns difference of <C>firstList</C> and  <C>secondList</C>.
+         *
+         * @param[in] firstList   first list in difference
+         * @param[in] secondList  second list in difference (to be
+         *                        subtracted)
+         * @return  difference of both lists
+         */
+        static StringList difference (IN StringList& firstList,
+                                      IN StringList& secondList)
+        {
+            StringList result;
+
+            for (const String& element : firstList) {
+                if (!secondList.contains(element)) {
+                    result.append(element);
+                }
+            }
+
+            return result;
+        }       
+
         /*--------------------*/
 
         /**

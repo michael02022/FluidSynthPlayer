@@ -72,8 +72,8 @@ static void _adaptForScientificNotation (INOUT Real& value,
                                          INOUT Natural& fractionalDigitCount,
                                          OUT String& suffix)
 {
-    Real logarithm = std::log10((float) value);
-    Integer digitCount = (Integer) logarithm.floor();
+    Real logarithm = std::log10(float(value));
+    Integer digitCount = Integer(logarithm.floor());
     Boolean needsScientificNotation;
 
     if (scientificNotationIsForced) {
@@ -176,6 +176,21 @@ Real::Real (IN Natural n)
 /* type conversions   */
 /*--------------------*/
 
+Real Real::toSinglePrecision () const
+{
+    float f = float(std::abs(_value));
+    const double d = f;
+    
+    if (d - f > 0.0) {
+        f = float(std::nextafter(d, std::numeric_limits<float>::infinity()));
+    }
+
+    f = std::copysignf(f, float(_value));
+    return Real{f};
+}
+
+/*--------------------*/
+
 String Real::toString (IN Natural precision,
                        IN Natural fractionalDigitCount,
                        IN String& padString,
@@ -183,8 +198,6 @@ String Real::toString (IN Natural precision,
 {
     const Natural p = Natural::maximum(precision, fractionalDigitCount + 1);
     const Natural totalWidth = p + 2;  /* take care of sign and decimal point */
-    Natural integralDigitCount = p - fractionalDigitCount;
-    Natural fracDigitCount = fractionalDigitCount;
     String result;
 
     if (std::isnan(_value)) {
@@ -193,6 +206,7 @@ String Real::toString (IN Natural precision,
         result = (std::signbit(_value) ? "-inf" : "+inf");
         result = STR::paddedRight(result, totalWidth, " ");
     } else {
+        Natural integralDigitCount = p - fractionalDigitCount;
         String integralPartAsString;
         String fractionalPartAsString;
         String sign;
@@ -203,6 +217,7 @@ String Real::toString (IN Natural precision,
             integralPartAsString = "0";
             fractionalPartAsString = "";
         } else {
+            Natural fracDigitCount = fractionalDigitCount;
             Real v = abs(_value);
             sign = (_value < 0.0 ? "-" : "+");
 
@@ -231,7 +246,7 @@ String Real::toString (IN Natural precision,
             while (fP > 0.0
                    && fractionalPartAsString.length() < fracDigitCount) {
                 fP *= 10.0;
-                Natural digit = (Natural) fP.floor();
+                Natural digit = Natural(fP.floor());
                 fP -= Real{digit};
                 fractionalPartAsString += STR::substring(_digitList, digit, 1);
             }
@@ -428,6 +443,13 @@ Real Real::sqr (IN Real x)
 Real Real::sqrt (IN Real x)
 {
     return Real{std::sqrt(x._value)};
+}
+
+/*--------------------*/
+
+Real Real::toSinglePrecision (IN Real r)
+{
+    return r.toSinglePrecision();
 }
 
 /*--------------------*/

@@ -19,8 +19,8 @@
 
 /*--------------------*/
 
-using BaseTypes::Containers::clearArray;
-using BaseTypes::Containers::convertArray;
+using BaseTypes::Containers::Array_clear;
+using BaseTypes::Containers::Array_convert;
 using Libraries::DynamicLibrary;
 using Libraries::FluidSynth::FluidSynthSynthesizer;
 
@@ -29,102 +29,137 @@ using Libraries::FluidSynth::FluidSynthSynthesizer;
 /*-----------------------------------------*/
 
 /** synthesizer creation function type in library  */
-typedef Object (*FSSynthesizer_CreationProc)(Object);
+typedef Object (*_FSSynthesizer_CreationProc)(Object);
 
 /** synthesizer destruction function type in library */
-typedef void (*FSSynthesizer_DestructionProc)(Object);
+typedef void (*_FSSynthesizer_DestructionProc)(Object);
 
 /** MIDI bank selection function type in library */
-typedef int (*FSSynthesizer_BankChangeProc)(Object, int, int);
+typedef int (*_FSSynthesizer_BankChangeProc)(Object, int, int);
 
 /** MIDI control change function type in library */
-typedef int (*FSSynthesizer_ControlChangeProc)(Object, int, int, int);
+typedef int (*_FSSynthesizer_ControlChangeProc)(Object, int, int, int);
 
 /** MIDI channel pressure function type in library */
-typedef int (*FSSynthesizer_ChannelPressureProc)(Object, int, int);
+typedef int (*_FSSynthesizer_ChannelPressureProc)(Object, int, int);
 
 /** MIDI note off function type in library */
-typedef int (*FSSynthesizer_NoteOffProc)(Object, int, int);
+typedef int (*_FSSynthesizer_NoteOffProc)(Object, int, int);
 
 /** MIDI note on function type in library */
-typedef int (*FSSynthesizer_NoteOnProc)(Object, int, int, int);
+typedef int (*_FSSynthesizer_NoteOnProc)(Object, int, int, int);
 
 /** MIDI pitch bend function type in library */
-typedef int (*FSSynthesizer_PitchBendProc)(Object, int, int);
+typedef int (*_FSSynthesizer_PitchBendProc)(Object, int, int);
 
 /** MIDI polyphonic key pressure function type in library */
-typedef int (*FSSynthesizer_PolyphonicKeyPressureProc)(Object, int, int, int);
+typedef int (*_FSSynthesizer_PolyphonicKeyPressureProc)(Object, int, int, int);
 
 /** audio buffer processing function type in library */
-typedef int (*FSSynthesizer_ProcessProc)(Object, int, int,
+typedef int (*_FSSynthesizer_ProcessProc)(Object, int, int,
                                          Object, int, Object);
 
 /** MIDI program change function type in library */
-typedef int (*FSSynthesizer_ProgChangeProc)(Object, int, int);
+typedef int (*_FSSynthesizer_ProgChangeProc)(Object, int, int);
 
 /** sound font load function type in library */
-typedef int (*FSSynthesizer_SFLoadProc)(Object, const char*, int);
+typedef int (*_FSSynthesizer_SFLoadProc)(Object, const char*, int);
 
 /** internal size function type in library */
-typedef int (*FSSynthesizer_SizeProc)(Object);
-
+typedef int (*_FSSynthesizer_SizeProc)(Object);
 
 /** SPECIAL FUNCTION: setting function type for interpolation method
   * in library */
-typedef int (*FSSynthesizer_SetInterpolationMethodProc)(Object, int, int);
+typedef int (*_FSSynthesizer_SetInterpolationMethodProc)(Object, int, int);
  
-
 /*--------------------*/
 
-/** synthesizer creation function in library  */
-static FSSynthesizer_CreationProc FSSynthesizer_make;
+namespace Libraries::FluidSynth {
 
-/** synthesizer destruction function in library */
-static FSSynthesizer_DestructionProc FSSynthesizer_destroy;
+    struct _FSSynthesizerDescriptor {
 
-/** the internal buffer size (raster) in library */
-static FSSynthesizer_SizeProc FSSynthesizer_internalBufferSize;
+        /** the underlying synthesizer object */
+        Object synthesizer = nullptr;
 
-/** the number of audio channel pairs in library */
-static FSSynthesizer_SizeProc FSSynthesizer_audioChannelPairCount;
+        /** the associated fluidsynth library */
+        FluidSynth* associatedLibrary = nullptr;
 
-/** MIDI bank select function type in library */
-static FSSynthesizer_BankChangeProc FSSynthesizer_handleBankChange;
+        /** synthesizer creation function in library  */
+        _FSSynthesizer_CreationProc synthesizerMake;
 
-/** MIDI channel pressure function in library */
-static FSSynthesizer_ChannelPressureProc FSSynthesizer_handleChannelPressure;
+        /** synthesizer destruction function in library */
+        _FSSynthesizer_DestructionProc synthesizerDestroy;
 
-/** MIDI control change function type in library */
-static FSSynthesizer_ControlChangeProc FSSynthesizer_handleControlChange;
+        /** the internal buffer size (raster) in library */
+        _FSSynthesizer_SizeProc synthesizerInternalBufferSize;
 
-/** MIDI note off function in library */
-static FSSynthesizer_NoteOffProc FSSynthesizer_handleNoteOff;
+        /** the number of audio channel pairs in library */
+        _FSSynthesizer_SizeProc synthesizerAudioChannelPairCount;
 
-/** MIDI note on function in library */
-static FSSynthesizer_NoteOnProc FSSynthesizer_handleNoteOn;
+        /** MIDI bank select function type in library */
+        _FSSynthesizer_BankChangeProc synthesizerHandleBankChange;
 
-/** MIDI pitch bend processing function in library */
-static FSSynthesizer_PitchBendProc FSSynthesizer_handlePitchBend;
+        /** MIDI channel pressure function in library */
+        _FSSynthesizer_ChannelPressureProc synthesizerHandleChannelPressure;
 
-/** MIDI polyphonic pressure function in library */
-static FSSynthesizer_PolyphonicKeyPressureProc
-           FSSynthesizer_handlePolyphonicPressure;
+        /** MIDI control change function type in library */
+        _FSSynthesizer_ControlChangeProc
+            synthesizerHandleControlChange;
 
-/** MIDI program change function in library */
-static FSSynthesizer_ProgChangeProc FSSynthesizer_handleProgramChange;
+        /** MIDI note off function in library */
+        _FSSynthesizer_NoteOffProc synthesizerHandleNoteOff;
 
-/** sound font load function in library */
-static FSSynthesizer_SFLoadProc FSSynthesizer_loadSoundFont;
+        /** MIDI note on function in library */
+        _FSSynthesizer_NoteOnProc synthesizerHandleNoteOn;
 
-/** audio buffer processing function in library */
-static FSSynthesizer_ProcessProc FSSynthesizer_process;
+        /** MIDI pitch bend processing function in library */
+        _FSSynthesizer_PitchBendProc synthesizerHandlePitchBend;
 
-/** interpolation method set function in library */
-static FSSynthesizer_SetInterpolationMethodProc
-            FSSynthesizer_setInterpolationMethod;
+        /** MIDI polyphonic pressure function in library */
+        _FSSynthesizer_PolyphonicKeyPressureProc
+            synthesizerHandlePolyphonicPressure;
 
-/** flag to tell whether function pointers have been initialized */
-static Boolean _functionsAreInitialized = false;
+        /** MIDI program change function in library */
+        _FSSynthesizer_ProgChangeProc synthesizerHandleProgramChange;
+
+        /** sound font load function in library */
+        _FSSynthesizer_SFLoadProc synthesizerLoadSoundFont;
+
+        /** audio buffer processing function in library */
+        _FSSynthesizer_ProcessProc synthesizerProcess;
+
+        /** interpolation method set function in library */
+        _FSSynthesizer_SetInterpolationMethodProc
+            synthesizerSetInterpolationMethod;
+
+        /*--------------------*/
+        /* con-/destruction   */
+        /*--------------------*/
+
+        /**
+         * Connects functions dynamically to functions from
+         * <C>fsLibrary</C> and stores <C>fsSettings</C> object.
+         *
+         * @param[in] fsLibrary   associated fluidsynth library
+         * @param[in] fsSettings  associated fluidsynth settings
+         *                        object
+         */
+        _FSSynthesizerDescriptor (IN FluidSynth* fsLibrary,
+                                  IN FluidSynthSettings* fsSettings);
+
+        /*--------------------*/
+
+        /**
+         * Finalizes descriptor
+         */
+        ~_FSSynthesizerDescriptor ();
+
+    };
+}
+
+/*====================*/
+
+using Libraries::FluidSynth::_FSSynthesizerDescriptor;
 
 /*--------*/
 /* MACROS */
@@ -136,7 +171,7 @@ static const String _errorMessageForUndefinedDescriptor =
 
 /** error message for a bad interpolation method */
 static const String _errorMessageForBadInterpolationMethodCode =
-    "interpolation method code must be 0, 1, 4 or 7";
+    "interpolation method code must be 0, 1, 4, 5, 6 or 7";
 
 /** reports that function with <C>name</C> is not dynamically defined */
 #define _reportBadFunction(name) \
@@ -144,90 +179,91 @@ static const String _errorMessageForBadInterpolationMethodCode =
 
 /** simple macro for dynamic binding of a function */
 #define GPA(signature, name) \
-    (signature)((DynamicLibrary*) fsLibrary)->getFunctionByName(name)
+    reinterpret_cast<signature>(library->getFunctionByName(name))
 
-/*====================*/
-/* PRIVATE FEATURES   */
-/*====================*/
+/*==========================*/
+/* _FSSynthesizerDescriptor */
+/*==========================*/
 
-namespace Libraries::FluidSynth {
-
-    struct _SynthesizerDescriptor {
-
-        /** the underlying synthesizer object */
-        Object synthesizer = NULL;
-
-        /** the associated fluidsynth library */
-        FluidSynth* associatedLibrary = NULL;
-
-    };
-}
-
-/*====================*/
-
-/*--------------------*/
-/*--------------------*/
-
-
-
-/**
- * Connects static functions dynamically to functions from DLL
- * <C>fsLibrary</C>
- *
- * @param[in] fsLibrary  underlying fluidsynth library
- */
-static void _initializeFunctionsForLibrary (IN Object fsLibrary)
+_FSSynthesizerDescriptor::
+_FSSynthesizerDescriptor (IN FluidSynth* fsLibrary,
+                          IN FluidSynthSettings* fsSettings)
 {
     Logging_trace(">>");
 
-    if (fsLibrary == NULL) {
+    if (fsLibrary == nullptr) {
         Logging_traceError("fluidsynth library not loaded");
-    } else if (!_functionsAreInitialized) {
-        FSSynthesizer_make =
-            GPA(FSSynthesizer_CreationProc, "new_fluid_synth");
-        FSSynthesizer_destroy =
-            GPA(FSSynthesizer_DestructionProc, "delete_fluid_synth");
+    } else {
+        associatedLibrary = const_cast<FluidSynth*>(fsLibrary);
+        const DynamicLibrary* library =
+            reinterpret_cast<DynamicLibrary*>(fsLibrary->underlyingObject());
 
-        FSSynthesizer_internalBufferSize =
-            GPA(FSSynthesizer_SizeProc,
+        synthesizerMake =
+            GPA(_FSSynthesizer_CreationProc, "new_fluid_synth");
+        synthesizerDestroy =
+            GPA(_FSSynthesizer_DestructionProc, "delete_fluid_synth");
+
+        synthesizerInternalBufferSize =
+            GPA(_FSSynthesizer_SizeProc,
                 "fluid_synth_get_internal_bufsize");
-        FSSynthesizer_audioChannelPairCount =
-            GPA(FSSynthesizer_SizeProc,
+        synthesizerAudioChannelPairCount =
+            GPA(_FSSynthesizer_SizeProc,
                 "fluid_synth_count_audio_channels");
-        FSSynthesizer_handleBankChange =
-            GPA(FSSynthesizer_BankChangeProc, "fluid_synth_bank_select");
-        FSSynthesizer_handleChannelPressure = 
-            GPA(FSSynthesizer_ChannelPressureProc,
+        synthesizerHandleBankChange =
+            GPA(_FSSynthesizer_BankChangeProc, "fluid_synth_bank_select");
+        synthesizerHandleChannelPressure = 
+            GPA(_FSSynthesizer_ChannelPressureProc,
                 "fluid_synth_channel_pressure");
-        FSSynthesizer_handleControlChange = 
-            GPA(FSSynthesizer_ControlChangeProc, "fluid_synth_cc");
-        FSSynthesizer_handleNoteOff =
-            GPA(FSSynthesizer_NoteOffProc, "fluid_synth_noteoff");
-        FSSynthesizer_handleNoteOn =
-            GPA(FSSynthesizer_NoteOnProc, "fluid_synth_noteon");
-        FSSynthesizer_handlePitchBend =
-            GPA(FSSynthesizer_PitchBendProc, "fluid_synth_pitch_bend");
-        FSSynthesizer_handlePolyphonicPressure = 
-            GPA(FSSynthesizer_PolyphonicKeyPressureProc,
+        synthesizerHandleControlChange = 
+            GPA(_FSSynthesizer_ControlChangeProc, "fluid_synth_cc");
+        synthesizerHandleNoteOff =
+            GPA(_FSSynthesizer_NoteOffProc, "fluid_synth_noteoff");
+        synthesizerHandleNoteOn =
+            GPA(_FSSynthesizer_NoteOnProc, "fluid_synth_noteon");
+        synthesizerHandlePitchBend =
+            GPA(_FSSynthesizer_PitchBendProc, "fluid_synth_pitch_bend");
+        synthesizerHandlePolyphonicPressure = 
+            GPA(_FSSynthesizer_PolyphonicKeyPressureProc,
                 "fluid_synth_key_pressure");
-        FSSynthesizer_handleProgramChange =
-            GPA(FSSynthesizer_ProgChangeProc,
+        synthesizerHandleProgramChange =
+            GPA(_FSSynthesizer_ProgChangeProc,
                 "fluid_synth_program_change");
-        FSSynthesizer_loadSoundFont =
-            GPA(FSSynthesizer_SFLoadProc, "fluid_synth_sfload");
-        FSSynthesizer_process =
-            GPA(FSSynthesizer_ProcessProc, "fluid_synth_process");
-        FSSynthesizer_setInterpolationMethod =
-            GPA(FSSynthesizer_SetInterpolationMethodProc,
+        synthesizerLoadSoundFont =
+            GPA(_FSSynthesizer_SFLoadProc, "fluid_synth_sfload");
+        synthesizerProcess =
+            GPA(_FSSynthesizer_ProcessProc, "fluid_synth_process");
+        synthesizerSetInterpolationMethod =
+            GPA(_FSSynthesizer_SetInterpolationMethodProc,
                 "fluid_synth_set_interp_method");
-
-        _functionsAreInitialized = true;
+        
+        if (synthesizerMake == nullptr) {
+            _reportBadFunction("make");
+        } else {
+            synthesizer = synthesizerMake(fsSettings->underlyingObject());
+        }
     }
-    
+
     Logging_trace("<<");
 }
 
+/*--------------------*/
 
+_FSSynthesizerDescriptor::~_FSSynthesizerDescriptor ()
+{
+    Logging_trace(">>");
+
+    if (synthesizer != nullptr) {
+        if (synthesizerDestroy == nullptr) {
+            _reportBadFunction("destroy");
+        } else {
+            synthesizerDestroy(synthesizer);
+        }
+    }
+
+    Logging_trace("<<");
+}
+
+/*--------------------*/
 
 /*====================*/
 /* PUBLIC FEATURES    */
@@ -235,27 +271,14 @@ static void _initializeFunctionsForLibrary (IN Object fsLibrary)
 
 FluidSynthSynthesizer::FluidSynthSynthesizer (IN FluidSynth* library,
                                               IN FluidSynthSettings* settings)
-    : _descriptor{NULL}
+    : _descriptor{nullptr}
 {
     Logging_trace(">>");
 
-    _descriptor = new _SynthesizerDescriptor();
-    _SynthesizerDescriptor& descriptor =
-        TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-    
-    if (!library->isLoaded()) {
+    if (!library->isLoaded() || settings == nullptr) {
         Logging_traceError("library or settings object is undefined");
     } else {
-        descriptor.associatedLibrary =
-            (FluidSynth*) library;
-        _initializeFunctionsForLibrary(library->underlyingObject());
-
-        if (FSSynthesizer_make == NULL) {
-            _reportBadFunction("make");
-        } else {
-            descriptor.synthesizer =
-                FSSynthesizer_make(settings->underlyingObject());
-        }
+        _descriptor = new _FSSynthesizerDescriptor(library, settings);
     }
     
     Logging_trace("<<");
@@ -266,23 +289,7 @@ FluidSynthSynthesizer::FluidSynthSynthesizer (IN FluidSynth* library,
 FluidSynthSynthesizer::~FluidSynthSynthesizer ()
 {
     Logging_trace(">>");
-
-    if (_descriptor != NULL) {
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-
-        if (descriptor.synthesizer != NULL) {
-            if (FSSynthesizer_destroy == NULL) {
-                _reportBadFunction("destroy");
-            } else {
-                FSSynthesizer_destroy(descriptor.synthesizer);
-            }
-        }
-
-        delete &descriptor;
-        _descriptor = NULL;
-    }
-
+    delete reinterpret_cast<_FSSynthesizerDescriptor*>(_descriptor);
     Logging_trace("<<");
 }
 
@@ -295,33 +302,37 @@ Natural FluidSynthSynthesizer::internalBufferSize () const
     Logging_trace(">>");
     Natural result = 0;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
-    } else if (FSSynthesizer_internalBufferSize == NULL) {
-        _reportBadFunction("internalBufferSize");
     } else {
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-        result = FSSynthesizer_internalBufferSize(descriptor.synthesizer);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
+        _FSSynthesizer_SizeProc synthesizerInternalBufferSize =
+            descriptor.synthesizerInternalBufferSize;
+
+        if (synthesizerInternalBufferSize == nullptr) {
+            _reportBadFunction("internalBufferSize");
+        } else {
+            result =
+                synthesizerInternalBufferSize(descriptor.synthesizer);
+        }
     }
     
     Logging_trace1("<<: %1", TOSTRING(result));
     return result;
 }
 
-
-
 /*--------------------*/
 
 FluidSynth* FluidSynthSynthesizer::library () const
 {
-    FluidSynth* result = NULL;
+    FluidSynth* result = nullptr;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
     } else {
-        const _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
         result = descriptor.associatedLibrary;
     }
 
@@ -332,13 +343,13 @@ FluidSynth* FluidSynthSynthesizer::library () const
 
 Object FluidSynthSynthesizer::underlyingObject () const
 {
-    Object result = NULL;
+    Object result = nullptr;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
     } else {
-        const _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
         result = descriptor.synthesizer;
     }
 
@@ -358,18 +369,23 @@ FluidSynthSynthesizer::handleBankChange (IN Natural channel,
 
     Boolean isOkay = false;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
-    } else if (FSSynthesizer_handleBankChange == NULL) {
-        _reportBadFunction("bankChange");
     } else {
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-        Integer operationResult =
-            FSSynthesizer_handleBankChange(descriptor.synthesizer,
-                                           (int) channel,
-                                           (int) bankNumber);
-        isOkay = (operationResult == 0);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
+        _FSSynthesizer_BankChangeProc synthesizerHandleBankChange =
+            descriptor.synthesizerHandleBankChange;
+
+        if (synthesizerHandleBankChange == nullptr) {
+            _reportBadFunction("bankChange");
+        } else {
+            Integer operationResult =
+                synthesizerHandleBankChange(descriptor.synthesizer,
+                                            int(channel),
+                                            int(bankNumber));
+            isOkay = (operationResult == 0);
+        }
     }
 
     Logging_trace1("<<: %1", TOSTRING(isOkay));
@@ -378,26 +394,32 @@ FluidSynthSynthesizer::handleBankChange (IN Natural channel,
 
 /*--------------------*/
 
-Boolean FluidSynthSynthesizer::handleChannelPressure (IN Natural channel,
-                                                      IN Natural value)
+Boolean
+FluidSynthSynthesizer::handleChannelPressure (IN Natural channel,
+                                              IN Natural value)
 {
     Logging_trace2(">>: channel = %1, value = %2",
                    TOSTRING(channel), TOSTRING(value));
 
     Boolean isOkay = false;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
-    } else if (FSSynthesizer_handleChannelPressure == NULL) {
-        _reportBadFunction("channelPressure");
     } else {
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-        Integer operationResult =
-            FSSynthesizer_handleChannelPressure(descriptor.synthesizer,
-                                                (int) channel,
-                                                (int) value);
-        isOkay = (operationResult == 0);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
+        _FSSynthesizer_ChannelPressureProc synthesizerHandleChannelPressure =
+            descriptor.synthesizerHandleChannelPressure;
+
+        if (synthesizerHandleChannelPressure == nullptr) {
+            _reportBadFunction("channelPressure");
+        } else {
+            Integer operationResult =
+                synthesizerHandleChannelPressure(descriptor.synthesizer,
+                                                 int(channel),
+                                                 int(value));
+            isOkay = (operationResult == 0);
+        }
     }
 
     Logging_trace1("<<: %1", TOSTRING(isOkay));
@@ -415,19 +437,24 @@ Boolean FluidSynthSynthesizer::handleControlChange (IN Natural channel,
 
     Boolean isOkay = false;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
-    } else if (FSSynthesizer_handleControlChange == NULL) {
-        _reportBadFunction("controlChange");
     } else {
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-        Integer operationResult =
-            FSSynthesizer_handleControlChange(descriptor.synthesizer,
-                                              (int) channel,
-                                              (int) controller,
-                                              (int) value);
-        isOkay = (operationResult == 0);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
+        _FSSynthesizer_ControlChangeProc synthesizerHandleControlChange =
+            descriptor.synthesizerHandleControlChange;
+
+        if (synthesizerHandleControlChange == nullptr) {
+            _reportBadFunction("controlChange");
+        } else {
+            Integer operationResult =
+                synthesizerHandleControlChange(descriptor.synthesizer,
+                                               int(channel),
+                                               int(controller),
+                                               int(value));
+            isOkay = (operationResult == 0);
+        }
     }
 
     Logging_trace1("<<: %1", TOSTRING(isOkay));
@@ -444,18 +471,23 @@ Boolean FluidSynthSynthesizer::handleNoteOff (IN Natural channel,
 
     Boolean isOkay = false;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
-    } else if (FSSynthesizer_handleNoteOff == NULL) {
-        _reportBadFunction("noteoff");
     } else {
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-        Integer operationResult =
-            FSSynthesizer_handleNoteOff(descriptor.synthesizer,
-                                        (int) channel,
-                                        (int) note);
-        isOkay = (operationResult == 0);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
+        _FSSynthesizer_NoteOffProc synthesizerHandleNoteOff =
+            descriptor.synthesizerHandleNoteOff;
+        
+        if (synthesizerHandleNoteOff == nullptr) {
+            _reportBadFunction("noteoff");
+        } else {
+            Integer operationResult =
+                synthesizerHandleNoteOff(descriptor.synthesizer,
+                                         int(channel),
+                                         int(note));
+            isOkay = (operationResult == 0);
+        }
     }
 
     Logging_trace1("<<: %1", TOSTRING(isOkay));
@@ -474,19 +506,24 @@ Boolean FluidSynthSynthesizer::handleNoteOn (IN Natural channel,
 
     Boolean isOkay = false;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
-    } else if (FSSynthesizer_handleNoteOn == NULL) {
-        _reportBadFunction("noteon");
     } else {
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-        Integer operationResult =
-            FSSynthesizer_handleNoteOn(descriptor.synthesizer,
-                                       (int) channel,
-                                       (int) note,
-                                       (int) velocity);
-        isOkay = (operationResult == 0);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
+        _FSSynthesizer_NoteOnProc synthesizerHandleNoteOn =
+            descriptor.synthesizerHandleNoteOn;
+
+        if (synthesizerHandleNoteOn == nullptr) {
+            _reportBadFunction("noteon");
+        } else {
+            Integer operationResult =
+                synthesizerHandleNoteOn(descriptor.synthesizer,
+                                        int(channel),
+                                        int(note),
+                                        int(velocity));
+            isOkay = (operationResult == 0);
+        }
     }
 
     Logging_trace1("<<: %1", TOSTRING(isOkay));
@@ -503,18 +540,23 @@ Boolean FluidSynthSynthesizer::handlePitchBend (IN Natural channel,
 
     Boolean isOkay = false;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
-    } else if (FSSynthesizer_handlePitchBend == NULL) {
-        _reportBadFunction("pitchBend");
     } else {
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-        Integer operationResult =
-            FSSynthesizer_handlePitchBend(descriptor.synthesizer,
-                                          (int) channel,
-                                          (int) value);
-        isOkay = (operationResult == 0);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
+        _FSSynthesizer_PitchBendProc synthesizerHandlePitchBend =
+            descriptor.synthesizerHandlePitchBend;
+
+        if (synthesizerHandlePitchBend == nullptr) {
+            _reportBadFunction("pitchBend");
+        } else {
+            Integer operationResult =
+                synthesizerHandlePitchBend(descriptor.synthesizer,
+                                           int(channel),
+                                           int(value));
+            isOkay = (operationResult == 0);
+        }
     }
 
     Logging_trace1("<<: %1", TOSTRING(isOkay));
@@ -533,19 +575,25 @@ FluidSynthSynthesizer::handlePolyphonicKeyPressure (IN Natural channel,
 
     Boolean isOkay = false;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
-    } else if (FSSynthesizer_handlePolyphonicPressure == NULL) {
-        _reportBadFunction("polyphonicKeyPressure");
     } else {
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-        Integer operationResult =
-            FSSynthesizer_handlePolyphonicPressure(descriptor.synthesizer,
-                                                   (int) channel,
-                                                   (int) key,
-                                                   (int) value);
-        isOkay = (operationResult == 0);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
+        _FSSynthesizer_PolyphonicKeyPressureProc
+            synthesizerHandlePolyphonicPressure =
+                descriptor.synthesizerHandlePolyphonicPressure;
+        
+        if (synthesizerHandlePolyphonicPressure == nullptr) {
+            _reportBadFunction("polyphonicKeyPressure");
+        } else {
+            Integer operationResult =
+                synthesizerHandlePolyphonicPressure(descriptor.synthesizer,
+                                                    int(channel),
+                                                    int(key),
+                                                    int(value));
+            isOkay = (operationResult == 0);
+        }
     }
 
     Logging_trace1("<<: %1", TOSTRING(isOkay));
@@ -563,18 +611,23 @@ FluidSynthSynthesizer::handleProgramChange (IN Natural channel,
 
     Boolean isOkay = false;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
-    } else if (FSSynthesizer_handleProgramChange == NULL) {
-        _reportBadFunction("programChange");
     } else {
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-        Integer operationResult =
-            FSSynthesizer_handleProgramChange(descriptor.synthesizer,
-                                              (int) channel,
-                                              (int) programNumber);
-        isOkay = (operationResult == 0);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
+        _FSSynthesizer_ProgChangeProc synthesizerHandleProgramChange =
+            descriptor.synthesizerHandleProgramChange;
+
+         if (synthesizerHandleProgramChange == nullptr) {
+             _reportBadFunction("programChange");
+        } else {
+             Integer operationResult =
+                 synthesizerHandleProgramChange(descriptor.synthesizer,
+                                                int(channel),
+                                                int(programNumber));
+             isOkay = (operationResult == 0);
+         }
     }
 
     Logging_trace1("<<: %1", TOSTRING(isOkay));
@@ -589,22 +642,27 @@ Boolean FluidSynthSynthesizer::loadSoundFont (IN String& soundFontPath)
 
     Boolean isOkay = false;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
-    } else if (FSSynthesizer_loadSoundFont == NULL) {
-        _reportBadFunction("loadSoundFont");
     } else {
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-        int soundFontId =
-            FSSynthesizer_loadSoundFont(descriptor.synthesizer,
-                                        soundFontPath.c_str(), 1);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
+        _FSSynthesizer_SFLoadProc synthesizerLoadSoundFont =
+            descriptor.synthesizerLoadSoundFont;
 
-        if (soundFontId < 0) {
-            Logging_trace("--: loading of the sound font failed!");
+        if (synthesizerLoadSoundFont == nullptr) {
+            _reportBadFunction("loadSoundFont");
         } else {
-            Logging_trace("--: sound font loaded");
-            isOkay = true;
+            int soundFontId =
+                synthesizerLoadSoundFont(descriptor.synthesizer,
+                                         soundFontPath.c_str(), 1);
+
+            if (soundFontId < 0) {
+                Logging_trace("--: loading of the sound font failed!");
+            } else {
+                Logging_trace("--: sound font loaded");
+                isOkay = true;
+            }
         }
     }
 
@@ -629,61 +687,69 @@ FluidSynthSynthesizer::process
 
     Boolean isOkay = false;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
-    } else if (FSSynthesizer_process == NULL) {
-        _reportBadFunction("process");
-    } else if (FSSynthesizer_audioChannelPairCount == NULL) {
-        _reportBadFunction("audioChannelPairCount");
     } else {
-        int i;
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
+        _FSSynthesizer_ProcessProc synthesizerProcess =
+            descriptor.synthesizerProcess;
+        _FSSynthesizer_SizeProc synthesizerAudioChannelPairCount =
+            descriptor.synthesizerAudioChannelPairCount;
 
-        /* count of channels that FluidSynth can handle */
-        const Natural fluidSynthChannelCount =
-            2 * FSSynthesizer_audioChannelPairCount(descriptor.synthesizer);
-        int effectiveChannelCount =
-            (size_t) Natural::minimum(channelCount + channelCount % 2,
-                                      fluidSynthChannelCount);
-            
-        /* provide a float buffer for FluidSynth with <dataPointCount>
-         * frames */
-        float** floatDataPointBuffer =
-            static_cast<float**>(makeLocalArray(float*,
-                                                effectiveChannelCount));
+        if (synthesizerProcess == nullptr) {
+            _reportBadFunction("process");
+        } else if (synthesizerAudioChannelPairCount == nullptr) {
+            _reportBadFunction("audioChannelPairCount");
+        } else {
+            int i;
 
-        for (i = 0;  i < effectiveChannelCount;  i++) {
-            floatDataPointBuffer[i] = 
-                static_cast<float*>(makeLocalArray(float, dataPointCount));
-            clearArray(floatDataPointBuffer[i], dataPointCount, 0.0f);
-        };
+            /* count of channels that FluidSynth can handle */
+            const Natural fluidSynthChannelCount =
+                2 * synthesizerAudioChannelPairCount(descriptor.synthesizer);
+            int effectiveChannelCount =
+                int(Natural::minimum(channelCount + channelCount % 2,
+                                     fluidSynthChannelCount));
 
-        /* mix dry audio and effects into data point buffer */
-        Integer operationResult =
-            FSSynthesizer_process(descriptor.synthesizer,
-                                  (int) dataPointCount,
-                                  effectiveChannelCount,
-                                  floatDataPointBuffer,
-                                  effectiveChannelCount,
-                                  floatDataPointBuffer);
+            /* provide a float buffer for FluidSynth with
+             * <dataPointCount> frames */
+            float** floatDataPointBuffer =
+                static_cast<float**>(Array_createLocal(float*,
+                                                    effectiveChannelCount));
 
-        effectiveChannelCount =
-            (size_t) Natural::minimum(channelCount, effectiveChannelCount);
+            for (i = 0;  i < effectiveChannelCount;  i++) {
+                floatDataPointBuffer[i] = 
+                    static_cast<float*>(Array_createLocal(float,
+                                                          dataPointCount));
+                Array_clear(floatDataPointBuffer[i], dataPointCount, 0.0f);
+            };
 
-        /* copy the channel data from FluidSynth into <dataPointBuffer> */
-        for (i = 0;  i < effectiveChannelCount;  i++) {
-            convertArray(dataPointBuffer[i].asArray(position),
-                         floatDataPointBuffer[i], dataPointCount);
+            /* mix dry audio and effects into data point buffer */
+            Integer operationResult =
+                synthesizerProcess(descriptor.synthesizer,
+                                   int(dataPointCount),
+                                   effectiveChannelCount,
+                                   floatDataPointBuffer,
+                                   effectiveChannelCount,
+                                   floatDataPointBuffer);
+
+            effectiveChannelCount =
+                int(Natural::minimum(channelCount, effectiveChannelCount));
+
+            /* copy the channel data from FluidSynth into <dataPointBuffer> */
+            for (i = 0;  i < effectiveChannelCount;  i++) {
+                Array_convert(dataPointBuffer[i].asArray(position),
+                              floatDataPointBuffer[i], dataPointCount);
+            }
+
+            /* clear remaining channels (if any) */
+            while (i < int(channelCount)) {
+                Array_clear(dataPointBuffer[i++].asArray(position),
+                            dataPointCount, AudioDataPoint{0.0});
+            }
+
+            isOkay = (operationResult == 0);
         }
-
-        /* clear remaining channels (if any) */
-        while (i < (int) channelCount) {
-            clearArray(dataPointBuffer[i++].asArray(position),
-                       dataPointCount, AudioDataPoint{0.0});
-        }
-
-        isOkay = (operationResult == 0);
     }
 
     Logging_trace1("<<: %1", TOSTRING(isOkay));
@@ -699,25 +765,30 @@ FluidSynthSynthesizer::setInterpolationMethod (IN Natural methodCode)
     
     Boolean isOkay = false;
 
-    if (_descriptor == NULL) {
+    if (_descriptor == nullptr) {
         Logging_traceError(_errorMessageForUndefinedDescriptor);
-    } else if (FSSynthesizer_setInterpolationMethod == NULL) {
-        _reportBadFunction("setInterpolationMethod");
-    } else if (methodCode != 0 && methodCode != 1
-               && methodCode != 4 && methodCode != 7) {
-        Logging_traceError(_errorMessageForBadInterpolationMethodCode);
     } else {
-        _SynthesizerDescriptor& descriptor =
-            TOREFERENCE<_SynthesizerDescriptor>(_descriptor);
-        Object synthesizer = descriptor.synthesizer;
-        isOkay = true;
+        _FSSynthesizerDescriptor& descriptor =
+            TOREFERENCE<_FSSynthesizerDescriptor>(_descriptor);
+        _FSSynthesizer_SetInterpolationMethodProc
+            synthesizerSetInterpolationMethod =
+                descriptor.synthesizerSetInterpolationMethod;
 
-        for (Natural channel = 0;  channel < 16;  channel++) {
-            Integer operationResult =
-                FSSynthesizer_setInterpolationMethod(synthesizer,
-                                                     (int) channel,
-                                                     (int) methodCode);
-            isOkay = isOkay && (operationResult == 0);
+        if (synthesizerSetInterpolationMethod == nullptr) {
+            _reportBadFunction("setInterpolationMethod");
+        } else if (!(methodCode == 0 || methodCode == 1
+                     || methodCode >= 4 && methodCode <= 7)) {
+            Logging_traceError(_errorMessageForBadInterpolationMethodCode);
+        } else {
+            isOkay = true;
+
+            for (Natural channel = 0;  channel < 16;  channel++) {
+                Integer operationResult =
+                    synthesizerSetInterpolationMethod(descriptor.synthesizer,
+                                                      int(channel),
+                                                      int(methodCode));
+                isOkay = isOkay && (operationResult == 0);
+            }
         }
     }
 

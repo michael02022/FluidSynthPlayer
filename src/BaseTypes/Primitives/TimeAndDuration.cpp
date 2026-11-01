@@ -82,9 +82,9 @@ static const String _digitCharacters = "0123456789";
  * @param[inout] isOkay      flag whether parsing was successful
  */
 static Boolean _fromString_process_inLimbo (IN Character ch,
-                                            INOUT Boolean isNegative,
-                                            INOUT Real partValue,
-                                            INOUT _ParseState parseState)
+                                            INOUT Boolean& isNegative,
+                                            INOUT Real& partValue,
+                                            INOUT _ParseState& parseState)
 {
     Boolean isOkay = true;
 
@@ -118,10 +118,10 @@ static Boolean _fromString_process_inLimbo (IN Character ch,
  * @param[inout] isOkay      flag whether parsing was successful
  */
 static Boolean _fromString_process_inPart (IN Character ch,
-                                           INOUT RealList partList,
-                                           INOUT Real partValue,
-                                           INOUT String fractionalPart,
-                                           INOUT _ParseState parseState)
+                                           INOUT RealList& partList,
+                                           INOUT Real& partValue,
+                                           INOUT String& fractionalPart,
+                                           INOUT _ParseState& parseState)
 {
     Boolean isOkay = true;
 

@@ -31,6 +31,10 @@ using STR = BaseModules::StringUtil;
 
 /*========================*/
 
+typedef char* CharPtr;
+
+/*--------------------*/
+
 #ifdef _WIN32
     /*=====================*/
     /* WINDOWS DEFINITIONS */
@@ -50,14 +54,15 @@ using STR = BaseModules::StringUtil;
         Windows::DWORD dwFlags = LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
         Object result =
             static_cast<Object>(
-                Windows::LoadLibraryExA(const_cast<char*>(pathName.c_str()),
-                                        NULL, dwFlags));
+                Windows::LoadLibraryExA(const_cast<CharPtr>(pathName.c_str()),
+                                        nullptr, dwFlags));
 
-        if (result == NULL) {
+        if (result == nullptr) {
             /* just for debugging the library loading */
-            Natural errorCode{(size_t) Windows::GetLastError()};
+            Natural errorCode{size_t(Windows::GetLastError())};
             String message{STR::expand("load error %1",
                                        TOSTRING(errorCode))};
+            Logging_trace1("--: %1", message);
         }
         
         return result;
@@ -78,7 +83,7 @@ using STR = BaseModules::StringUtil;
     {
         return Windows::GetProcAddress(
             static_cast<Windows::HMODULE>(descriptor),
-            const_cast<char*>(functionName.c_str()));
+            const_cast<CharPtr>(functionName.c_str()));
     }
 
 #else
@@ -95,12 +100,12 @@ using STR = BaseModules::StringUtil;
 
     Object _loadLibrary (IN String& pathName)
     {
-        Object result = (Object) dlopen((char*) pathName.c_str(),
-                                        RTLD_NOW);
+        Object result = Object(dlopen(CharPtr(pathName.c_str()),
+                                      RTLD_NOW));
 
-        if (result == NULL) {
+        if (result == nullptr) {
             /* just for debugging the library loading */
-            String message{(char *) dlerror()};
+            String message{CharPtr(dlerror())};
         }
 
         return result;
@@ -118,7 +123,7 @@ using STR = BaseModules::StringUtil;
     Object _getFunctionByName (IN Object descriptor,
                                IN String& functionName)
     {
-        return dlsym(descriptor, (char*) functionName.c_str());
+        return dlsym(descriptor, CharPtr(functionName.c_str()));
     }
 
 #endif
@@ -136,7 +141,7 @@ DynamicLibrary::DynamicLibrary (IN String& libraryName)
     Logging_trace1(">>: %1", libraryName);
     _descriptor = _loadLibrary(libraryName);
     Logging_trace1("<<: %1",
-                   (_descriptor != NULL ? "loaded" : "not loaded"));
+                   (_descriptor != nullptr ? "loaded" : "not loaded"));
 }
   
 /*--------------------*/
@@ -145,9 +150,9 @@ DynamicLibrary::~DynamicLibrary ()
 {
     Logging_trace(">>");
 
-    if (_descriptor != NULL) {
+    if (_descriptor != nullptr) {
         _freeLibrary(_descriptor);
-        _descriptor = NULL;
+        _descriptor = nullptr;
     }
 
     Logging_trace("<<");
@@ -171,7 +176,7 @@ void DynamicLibrary::addToSearchPath (IN String& searchPath)
 Boolean DynamicLibrary::isLoaded () const
 {
     Logging_trace(">>");
-    Boolean result = (_descriptor != NULL);
+    Boolean result = (_descriptor != nullptr);
     Logging_trace1("<<: %1", TOSTRING(result));
     return result;
 }
@@ -189,13 +194,13 @@ Object DynamicLibrary::getFunctionByName (IN String& functionName) const
 {
     Logging_trace1(">>: %1", functionName);
 
-    Object result = NULL;
+    Object result = nullptr;
 
-    if (_descriptor != NULL) {
+    if (_descriptor != nullptr) {
         result = _getFunctionByName(_descriptor, functionName);
     }
 
     Logging_trace1("<<: %1",
-                   (result != NULL ? "found" : "not found"));
+                   (result != nullptr ? "found" : "not found"));
     return result;
 }

@@ -39,6 +39,12 @@ using BaseTypes::Primitives::Integer;
 /** abbreviation for StringUtil */
 using STR = BaseModules::StringUtil;
 
+/*-----------------*/
+/* AUXILIARY TYPES */
+/*-----------------*/
+
+typedef Byte* BytePtr;
+
 /*----------------------*/
 /* FORWARD DECLARATIONS */
 /*----------------------*/
@@ -152,7 +158,7 @@ static void WaveFile__assertEquality (IN Natural expectedValue,
  *                                      from
  * @param[out]   isPCMData              information whether this is a
  *                                      format with integer samples
- * @param[out]   fileSize               the count in bytes of the complete
+ * @param[out]   expectedFileSize       the count in bytes of the complete
  *                                      file
  * @param[out]   channelCount           number of channels in data point
  *                                      buffer
@@ -341,7 +347,7 @@ static Integer WaveFile__readInteger (IN ByteList& byteList,
     int mask = 0x80;
 
     for (Natural i = 0;  i < byteCount;  i++) {
-        char b = (char) byteList[lastPosition - i];
+        char b = char(byteList[lastPosition - i]);
 
         if (i == 0) {
             /* extract sign bit */
@@ -350,7 +356,7 @@ static Integer WaveFile__readInteger (IN ByteList& byteList,
         }
 
         mask = mask << 8;
-        v = v << 8 | ((char) b & 0xFF);
+        v = v << 8 | (char(b) & 0xFF);
     }
 
     if (isNegative) {
@@ -384,7 +390,7 @@ static Natural WaveFile__readNatural (IN ByteList& byteList,
 
     for (Natural i = 0;  i < byteCount;  i++) {
         Byte b = byteList[lastPosition - i];
-        v = v << 8 | ((char) b & 0xFF);
+        v = v << 8 | (char(b) & 0xFF);
     }
 
     position = lastPosition + 1;
@@ -413,11 +419,13 @@ static Real WaveFile__readReal (IN ByteList& byteList,
     float f = 0;
     double d = 0;
     Boolean isDouble = (byteCount == 8);
-    Byte* sourcePtr = &((ByteList) byteList)[position];
-    Byte* destinationPtr = (isDouble ? (Byte*) &d : (Byte*) &f);
+    BytePtr sourcePtr = &(ByteList(byteList))[position];
+    BytePtr destinationPtr = (isDouble
+                              ? reinterpret_cast<BytePtr>(&d)
+                              : reinterpret_cast<BytePtr>(&f));
 
     if (isBigEndian) {
-        sourcePtr += ((int) byteCount - 1);
+        sourcePtr += (int(byteCount) - 1);
 
         for (Natural i = 0; i < byteCount; i++) {
             *destinationPtr++ = *sourcePtr--;
@@ -542,7 +550,7 @@ static void WaveFile__skipString (IN ByteList& byteList,
 
     for (Natural i = 0;  i < count;  i++) {
         Byte b = byteList[position + i];
-        st += (char) b;
+        st += char(b);
     }
 
     position = lastPosition + 1;
@@ -626,13 +634,13 @@ WaveFile__writeHeader(INOUT ByteList& byteList,
         WaveFile__writeInteger(byteList, position, 2, bitsPerDataPoint);
         const Natural speakerPositionMask = 0;
         WaveFile__writeInteger(byteList, position, 4, speakerPositionMask);
-        subformatPart = (size_t) 0x00000003;
+        subformatPart = size_t(0x00000003);
         WaveFile__writeInteger(byteList, position, 4, subformatPart);
-        subformatPart = (size_t) 0x00100000;
+        subformatPart = size_t(0x00100000);
         WaveFile__writeInteger(byteList, position, 4, subformatPart);
-        subformatPart = (size_t) 0x0aa000080;
+        subformatPart = size_t(0x0aa000080);
         WaveFile__writeInteger(byteList, position, 4, subformatPart);
-        subformatPart = (size_t) 0x0719b3800;
+        subformatPart = size_t(0x0719b3800);
         WaveFile__writeInteger(byteList, position, 4, subformatPart);
         
         /* write fact chunk */
@@ -662,10 +670,10 @@ static void WaveFile__writeInteger (INOUT ByteList& byteList,
                                     IN Natural byteCount,
                                     IN Integer n)
 {
-    int v = (int) n;
+    int v = int(n);
 
     for (Natural i = 0;  i < byteCount;  i++) {
-        byteList[position++] = ((int) v & 0xFF);
+        byteList[position++] = (int(v) & 0xFF);
         v >>= 8;
     }
 }
@@ -725,7 +733,7 @@ WaveFile__writeIntDataToByteList
             Real r = (dataPoint >= 1.0 ? scalingFactor - 1.0
                       : (dataPoint < -1.0 ? -scalingFactor
                          : dataPoint * scalingFactor));
-            Integer s = (Integer) r;
+            Integer s = Integer(r);
             rawDataList[i] = s;
             i += channelCount;
         }
@@ -758,14 +766,16 @@ static void WaveFile__writeReal (INOUT ByteList& byteList,
                                  IN Natural byteCount,
                                  IN Real r)
 {
-    float f = (float) r;
-    double d = (double) r;
-    Byte* sourcePtr = (byteCount == 4 ? (Byte*) &f : (Byte*) &d);
-    Byte* destinationPtr = &byteList[position];
+    float f = float(r);
+    double d = double(r);
+    BytePtr sourcePtr = (byteCount == 4
+                         ? reinterpret_cast<BytePtr>(&f)
+                         : reinterpret_cast<BytePtr>(&d));
+    BytePtr destinationPtr = &byteList[position];
     position += byteCount;
 
     if (isBigEndian) {
-        sourcePtr += ((int) byteCount - 1);
+        sourcePtr += (int(byteCount) - 1);
 
         for (Natural i = 0; i < byteCount; i++) {
             *destinationPtr++ = *sourcePtr--;
@@ -856,7 +866,7 @@ static void WaveFile__writeString (INOUT ByteList& byteList,
                                    IN String& st)
 {
     for (const Character ch : st) {
-        byteList[position++] = (char) ch;
+        byteList[position++] = char(ch);
     }
 }
 

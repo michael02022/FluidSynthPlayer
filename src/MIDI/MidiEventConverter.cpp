@@ -43,11 +43,12 @@ static Boolean _setPreset (INOUT FluidSynthSynthesizer& synthesizer,
 /* PRIVATE FEATURES    */
 /*====================*/
 
-/** the name of the key for the MIDI preset with bank and program */
-static const String _presetKey = "preset";
-
 /** the number of the drums midi channel */
 static const Natural _drumsMidiChannel = 10;
+
+/** the separator for the interpolation method value for realtime and
+ * file rendering */
+static const String _interpolationMethodSeparator = ";";
 
 /*====================*/
 
@@ -62,6 +63,9 @@ namespace MIDI {
      */
     struct _MidiEventConverterDescriptor {
 
+        /** a fluidsynth synthesizer object */
+        FluidSynthSynthesizer* synthesizer;
+
         /** the dictionary of settings with fluidsynth keys */
         Dictionary settingsDictionary;
 
@@ -69,15 +73,12 @@ namespace MIDI {
          * synthesizer */
         Natural synthesizerBufferSize;
 
-        /** a fluidsynth synthesizer object */
-        FluidSynthSynthesizer* synthesizer;
-
         /** a flag to tell whether sound font is loaded */
         Boolean soundFontIsOkay;
 
-        /** a flag to tell whether synthesizer is available for
-         * playback */
-        Boolean synthesizerIsAvailable;
+        /** a flag to tell whether the synthesizer has to work in
+         * realtime */
+        Boolean processingIsInRealtime;
 
         /** the name of the currently active preset (either set in the
          * settings or via a program change) */
@@ -126,19 +127,20 @@ namespace MIDI {
             (IN _MidiEventConverterDescriptor& otherDescriptor) = delete;
 
         /*--------------------*/
-        /* property change    */
+        /* property access    */
         /*--------------------*/
 
         /**
-         * Changes settings for <C>key</C> to <C>value</C>.
+         * Returns the default mapping from keys to values for the
+         * fluidsynth settings.
          *
-         * @param[in] key    fluidsynth settings key
-         * @param[in] value  associated string value
-         * @return  information whether set operation has been
-         *          successful
+         * @return  map of default values for all keys relevant for
+         *          initialization
          */
-        Boolean setSetting (IN String& key, IN String& value);
-
+        static const Dictionary& settingsKeyToDefaultValueMap ();
+        
+        /*--------------------*/
+        /* property change    */
         /*--------------------*/
 
         /**
@@ -157,8 +159,8 @@ namespace MIDI {
          * @return  information whether program change handling has
          *          been successful
          */
-        Boolean handleProgramChange (IN String& value,
-                                     IN Boolean changeIsForced = false);
+        Boolean handlePresetChange (IN String& value,
+                                    IN Boolean changeIsForced = false);
 
         /*--------------------*/
 
@@ -211,6 +213,19 @@ namespace MIDI {
 
         /*--------------------*/
 
+        /**
+         * Sets setting in descriptor given by <C>key</C> to new
+         * value given by <C>value</C>
+         *
+         * @param[in] key    settings name
+         * @param[in] value  value for key as string 
+         * @return  information whether set operation has been successful
+         */
+        Boolean setSetting (IN String& key,
+                            IN String& value);
+
+        /*--------------------*/
+
         private:
 
             /** flag for suppressing audio output for bad
@@ -220,6 +235,9 @@ namespace MIDI {
             /** tells that current program number is valid */
             Boolean _hasValidPreset;
         
+            /** a fluidsynth library object */
+            FluidSynth* _library;
+
             /** a fluidsynth settings object */
             FluidSynthSettings* _settings;
 
@@ -231,22 +249,68 @@ namespace MIDI {
 
 using MIDI::_MidiEventConverterDescriptor;
 
+/*===================*/
+/* support functions */
+/*===================*/
+
+/**
+ * Calculates the interpolation method code from
+ * <C>interpolationMethod</C>.
+ *
+ * @param[in] interpolationMethod  string for interpolation method
+ *                                 (may be empty)
+ * @param[in] isRealtime           tells whether the realtime or
+ *                                 file render setting shall be used
+ * @return  numeric method code
+ */
+static Natural
+_interpolationMethodCodeFromSettings (IN String& interpolationMethod,
+                                      IN Boolean isInRealtime)
+{
+    /* default interpolation method is 4 for realtime, 7 for
+     * file rendering */
+    Natural result = (isInRealtime ? 4 : 7);
+
+    if (interpolationMethod > "") {
+        /* split string at separator */
+        const StringList valueList =
+            StringList::makeBySplit(interpolationMethod,
+                                    _interpolationMethodSeparator);
+
+        if (valueList.length() > 0) {
+            const Natural index =
+                (valueList.length() == 1 || isInRealtime ? 0 : 1);
+            const String value = valueList.at(index);
+
+            if (STR::isNatural(value)) {
+                result = STR::toNatural(value);
+            }
+        }
+    }
+
+    return result;
+}
+
 /*===============================*/
 /* _MidiEventConverterDescriptor */
 /*===============================*/
+
+/*--------------------*/
+/* con-/destruction   */
+/*--------------------*/
 
 _MidiEventConverterDescriptor
 ::_MidiEventConverterDescriptor (IN Boolean audioIsSuppressedForBadSettings)
 {
     Logging_trace(">>");
 
-    const FluidSynth* library = new FluidSynth();
-    _settings = new FluidSynthSettings(library);
+    _library  = new FluidSynth();
+    _settings = new FluidSynthSettings(_library);
     _audioIsSuppressedForBadSettings = audioIsSuppressedForBadSettings;
-    synthesizer = new FluidSynthSynthesizer(library, _settings);
-    synthesizerBufferSize = (!library->isLoaded() ? 0
+    synthesizer = new FluidSynthSynthesizer(_library, _settings);
+    synthesizerBufferSize = (!_library->isLoaded() ? 0
                              : synthesizer->internalBufferSize());
-    synthesizerIsAvailable = true;
+    processingIsInRealtime = false;
     _hasValidPreset = false;
 
     Logging_trace("<<");
@@ -257,124 +321,27 @@ _MidiEventConverterDescriptor
 _MidiEventConverterDescriptor::~_MidiEventConverterDescriptor ()
 {
     Logging_trace(">>");
-    synthesizerIsAvailable = false;
     delete synthesizer;
     delete _settings;
+    delete _library;
     Logging_trace("<<");
 }
 
 /*--------------------*/
+/* property queries   */
+/*--------------------*/
 
-Boolean
-_MidiEventConverterDescriptor::setSetting (IN String& key,
-                                           IN String& value)
+const Dictionary&
+_MidiEventConverterDescriptor::settingsKeyToDefaultValueMap ()
 {
-    Logging_trace2(">>: key = %1, value = %2", key, value);
-
-    const String acceptedKeyPrefix = "synth.";
-    const String alternativePresetKey = "program";
-    const String interpolationMethodKey = "synth.interpolation-method";
-    const StringList restartingKeysList =
-        StringList::makeBySplit("synth.sample-rate,"
-                                "synth.interpolation-method,"
-                                "synth.verbose",
-                                ",");
-    const StringList specialKeysList =
-        StringList::makeBySplit("synth.interpolation-method", ",");
-    const String soundFontKey = "soundfont";
-    String effectiveKey = key;
-
-    enum class UpdateLevel
-        { restart = 0, soundFont = 1, program = 2, std = 3, error = 99 };
-    UpdateLevel updateLevel = UpdateLevel::error;
-    
-    Boolean isOkay = true;
-    synthesizerIsAvailable = false;
-
-    /* replace 'program' by 'preset' as key */
-    if (key == alternativePresetKey) {
-        effectiveKey = _presetKey;
-    }
-    
-    if (effectiveKey == soundFontKey) {
-        updateLevel = UpdateLevel::soundFont;
-    } else if (effectiveKey == _presetKey) {
-        updateLevel = UpdateLevel::program;
-    } else if (!STR::startsWith(effectiveKey, acceptedKeyPrefix)) {
-        updateLevel = UpdateLevel::error;
-        isOkay = false;
-    } else {
-        updateLevel = UpdateLevel::std;
-
-        if (!specialKeysList.contains(effectiveKey)) {
-            /* the synthesizer settings can handle that*/
-            isOkay = _settings->set(effectiveKey, value);
-        }
-
-        if (isOkay && (restartingKeysList.contains(effectiveKey))) {
-            updateLevel = UpdateLevel::restart;
-        }
-    }
-
-    if (updateLevel != UpdateLevel::error) {
-        settingsDictionary.set(effectiveKey, value);
-    }
-
-    Logging_trace1("--: updateLevel = %1",
-                   TOSTRING(Natural{(size_t) updateLevel}));
-    
-    if (isOkay && updateLevel == UpdateLevel::restart) {
-        /* restart synthesizer when synthesizer related setting is
-         * activated */
-        const FluidSynth* library = synthesizer->library();
-        delete synthesizer;
-        synthesizer = new FluidSynthSynthesizer(library, _settings);
-        synthesizerBufferSize = (!library->isLoaded() ? 0
-                                 : synthesizer->internalBufferSize());
-    }
-
-    if (isOkay && updateLevel <= UpdateLevel::soundFont) {
-        if (settingsDictionary.contains(soundFontKey)) {
-            String soundFontValue = settingsDictionary.at(soundFontKey);
-            isOkay = handleSoundFontChange(soundFontValue);
-        }
-    }
-    
-    if (isOkay
-        && (updateLevel == UpdateLevel::restart
-            || updateLevel == UpdateLevel::program)) {
-        if (settingsDictionary.contains(_presetKey)) {
-            String presetIdentification{settingsDictionary.at(_presetKey)};
-            isOkay = handleProgramChange(presetIdentification, true);
-            _hasValidPreset = true;
-        }
-
-        if (!isOkay) {
-            /* remove invalid entry for program to signal error */
-            settingsDictionary.remove(_presetKey);
-        }
-    }
-    
-    if (isOkay && updateLevel < UpdateLevel::std) {
-        /* restore specific settings for synthesizer */
-        if (settingsDictionary.contains(interpolationMethodKey)) {
-            String methodCodeAsString =
-                settingsDictionary.at(interpolationMethodKey);
-            Natural methodCode = STR::toNatural(methodCodeAsString);
-            isOkay = synthesizer->setInterpolationMethod(methodCode);
-        }
-    }
-
-    synthesizerIsAvailable =
-        (!_audioIsSuppressedForBadSettings || soundFontIsOkay);
-    
-    Logging_trace1("<<: %1", TOSTRING(isOkay));
-    return isOkay;
+    return FluidSynthSettings::keyToDefaultValueMap();
 }
 
 /*--------------------*/
+/* property change    */
+/*--------------------*/
 
-Boolean _MidiEventConverterDescriptor::handleProgramChange
+Boolean _MidiEventConverterDescriptor::handlePresetChange
                       (IN String& value,
                        IN Boolean changeIsForced)
 {
@@ -389,7 +356,6 @@ Boolean _MidiEventConverterDescriptor::handleProgramChange
     } else {
         Natural bankNumber;
         Natural programNumber;
-        Boolean bankIsEmpty;
         MidiPresetIdentification presetIdentification{value};
         isOkay = presetIdentification.split(bankNumber, programNumber);
 
@@ -451,13 +417,13 @@ Boolean _MidiEventConverterDescriptor::processMidiEvent (IN MidiEvent& event)
         const Natural midiChannel = event.channel();
 
         if (eventKind == MidiEventKind::channelPressure) {
-            const Natural value = (Natural) event.getDataByte(1);
+            const Natural value = Natural(event.getDataByte(1));
             isOkay = synthesizer->handleChannelPressure(midiChannel, value);
         } else if (eventKind == MidiEventKind::controlChange) {
-            const Natural controller = (Natural) event.getDataByte(1);
-            const Natural value      = (Natural) event.getDataByte(2);
+            const Natural controller = Natural(event.getDataByte(1));
+            const Natural value      = Natural(event.getDataByte(2));
             const Boolean isBankChange =
-                (controller == 0 && controller == 32);
+                (controller == 0 || controller == 32);
 
             if (_hasValidPreset && isBankChange) {
                 Logging_trace("--: skipped bank change when preset is valid");
@@ -469,24 +435,24 @@ Boolean _MidiEventConverterDescriptor::processMidiEvent (IN MidiEvent& event)
                                                           controller, value);
             }
         } else if (eventKind == MidiEventKind::noteOff) {
-            const Natural key = (Natural) event.getDataByte(1);
+            const Natural key = Natural(event.getDataByte(1));
             isOkay = synthesizer->handleNoteOff(midiChannel, key);
         } else if (eventKind == MidiEventKind::noteOn) {
-            const Natural key          = (Natural) event.getDataByte(1);
-            const Natural midiVelocity = (Natural) event.getDataByte(2);
+            const Natural key          = Natural(event.getDataByte(1));
+            const Natural midiVelocity = Natural(event.getDataByte(2));
             isOkay = synthesizer->handleNoteOn(midiChannel,
                                                key, midiVelocity);
         } else if (eventKind == MidiEventKind::pitchBend) {
-            const Natural value = ((Natural) event.getDataByte(1)
-                                   + (Natural) event.getDataByte(2) * 128);
+            const Natural value = (Natural(event.getDataByte(1))
+                                   + Natural(event.getDataByte(2) * 128));
             isOkay = synthesizer->handlePitchBend(midiChannel, value);
         } else if (eventKind == MidiEventKind::polyphonicKeyPressure) {
-            const Natural key   = (Natural) event.getDataByte(1);
-            const Natural value = (Natural) event.getDataByte(2);
+            const Natural key   = Natural(event.getDataByte(1));
+            const Natural value = Natural(event.getDataByte(2));
             isOkay = synthesizer->handlePolyphonicKeyPressure(midiChannel,
                                                               key, value);
         } else if (eventKind == MidiEventKind::programChange) {
-            const Natural programNumber = (Natural) event.getDataByte(1);
+            const Natural programNumber = Natural(event.getDataByte(1));
 
             if (_hasValidPreset) {
                 /* ignore */
@@ -494,7 +460,6 @@ Boolean _MidiEventConverterDescriptor::processMidiEvent (IN MidiEvent& event)
             } else {
                 isOkay = synthesizer->handleProgramChange(midiChannel,
                                                           programNumber);
-                synthesizerIsAvailable = isOkay && soundFontIsOkay;
             }
         }
     }
@@ -547,6 +512,124 @@ void _MidiEventConverterDescriptor::resetSettings ()
     Logging_trace("<<");
 }
 
+/*--------------------*/
+
+/** the alias name of the MIDI preset */
+static const String _Settings_Key_alternativePreset = "program";
+
+/** the (artificial) key for the interpolation method */
+static const String _Settings_Key_interpolationMethod =
+    "synth.interpolation-method";
+
+/** the name of the key for the MIDI preset with bank and program */
+static const String _Settings_Key_preset = "preset";
+
+/** the name of the key for the soundfont */
+static const String _Settings_Key_soundFont = "soundfont";
+
+/** the required prefix for the settings (except for soundfont and
+ * preset) */
+static const String _Settings_requiredKeyPrefix = "synth.";
+
+/** the list of all keys requiring special handling */
+static const StringList _Settings_specialKeysList =
+    StringList::fromList({_Settings_Key_interpolationMethod});
+
+/*--------------------*/
+
+Boolean
+_MidiEventConverterDescriptor::setSetting (IN String& key,
+                                           IN String& value)
+{
+    Logging_trace2(">>: key = %1, value = %2", key, value);
+
+    const StringList& restartingKeysList =
+        FluidSynthSettings::restartingKeysList();       
+    enum class UpdateLevel
+        { error = -1, std = 0, preset = 1, soundFont = 2, restart = 3 };
+
+    /* replace 'program' by 'preset' as key */
+    const String& effectiveKey =
+        (key == _Settings_Key_alternativePreset
+         ? _Settings_Key_preset : key);
+    Boolean isOkay = true;
+    UpdateLevel updateLevel = UpdateLevel::std;
+
+    if (effectiveKey == _Settings_Key_soundFont) {
+        updateLevel = UpdateLevel::soundFont;
+    } else if (effectiveKey == _Settings_Key_preset) {
+        updateLevel = UpdateLevel::preset;
+    } else if (!STR::startsWith(effectiveKey,
+                                _Settings_requiredKeyPrefix)) {
+        updateLevel = UpdateLevel::error;
+        isOkay = false;
+    } else {
+        if (!_Settings_specialKeysList.contains(effectiveKey)) {
+            isOkay = _settings->set(effectiveKey, value);
+        }
+
+        if (isOkay && restartingKeysList.contains(effectiveKey)) {
+            updateLevel = UpdateLevel::restart;
+        }
+    }
+
+    if (updateLevel != UpdateLevel::error) {
+        settingsDictionary.set(effectiveKey, value);
+    }
+
+    Logging_trace1("--: updateLevel = %1",
+                   TOSTRING(Natural{size_t(updateLevel)}));
+
+    if (isOkay && updateLevel == UpdateLevel::restart) {
+        /* restart synthesizer when synthesizer related setting is
+         * activated */
+        const FluidSynth* library = synthesizer->library();
+        delete synthesizer;
+        synthesizer = new FluidSynthSynthesizer(library, _settings);
+        synthesizerBufferSize = (!library->isLoaded() ? 0
+                                 : synthesizer->internalBufferSize());
+    }
+
+    if (isOkay && updateLevel >= UpdateLevel::soundFont) {
+        if (settingsDictionary.contains(_Settings_Key_soundFont)) {
+            const String soundFontValue =
+                settingsDictionary.at(_Settings_Key_soundFont);
+            isOkay = handleSoundFontChange(soundFontValue);
+        }
+    }
+
+    if (isOkay
+        && (updateLevel == UpdateLevel::restart
+            || updateLevel == UpdateLevel::preset)) {
+        if (settingsDictionary.contains(_Settings_Key_preset)) {
+            const String presetIdentification =
+                settingsDictionary.at(_Settings_Key_preset);
+            isOkay = handlePresetChange(presetIdentification, true);
+            _hasValidPreset = true;
+        }
+
+        if (!isOkay) {
+            /* remove invalid entry for preset to signal error */
+            settingsDictionary.remove(_Settings_Key_preset);
+        }
+    }
+
+    if (isOkay && updateLevel > UpdateLevel::std) {
+        /* restore specific settings for synthesizer */
+        const String interpolationMethod =
+            settingsDictionary.atWithDefault(_Settings_Key_interpolationMethod,
+                                             "");
+        const Natural interpolationMethodCode =
+            _interpolationMethodCodeFromSettings(interpolationMethod,
+                                                 processingIsInRealtime);
+        isOkay =
+            synthesizer->setInterpolationMethod(interpolationMethodCode);
+    }
+
+    Logging_trace1("<<: %1", TOSTRING(isOkay));
+    return isOkay;
+}
+
 /*====================*/
 
 /*--------------------*/
@@ -556,20 +639,20 @@ void _MidiEventConverterDescriptor::resetSettings ()
 /**
  * Clear <C>dataPointListVector</C>.
  *
- * @param[in] dataPointListVector      audio buffer to be set to 0
- * @param[in] dataPointCountInChannel  number of data points to set
+ * @param[in] dataPointListVector  audio buffer to be set to 0
+ * @param[in] frameCount           number of data points to set
  */
 static void
 _clearDataPointListVector
     (INOUT AudioDataPointListVector& dataPointListVector,
-     IN Natural dataPointCountInChannel)
+     IN Natural frameCount)
 {
     const Natural channelCount = dataPointListVector.length();
 
     for (Natural channel = 0;  channel < channelCount;  channel++) {
         AudioDataPointList& dataPointList = dataPointListVector[channel];
         
-        for (Natural j = 0;  j < dataPointCountInChannel;  j++) {
+        for (Natural j = 0;  j < frameCount;  j++) {
             dataPointList[j] = 0.0;
         }
     }
@@ -666,7 +749,7 @@ static Boolean _setPreset (INOUT FluidSynthSynthesizer& synthesizer,
 
 MidiEventConverter::MidiEventConverter
                         (IN Boolean audioIsSuppressedForBadSettings)
-    : _descriptor{NULL}
+    : _descriptor{nullptr}
 {
     Logging_trace(">>");
     _descriptor =
@@ -769,6 +852,14 @@ String MidiEventConverter::presetName () const
 
 /*--------------------*/
 
+const Dictionary&
+MidiEventConverter::settingsKeyToDefaultValueMap ()
+{
+    return _MidiEventConverterDescriptor::settingsKeyToDefaultValueMap();
+}
+
+/*--------------------*/
+
 String MidiEventConverter::soundFontName () const
 {
     Logging_trace(">>");
@@ -821,7 +912,7 @@ Boolean MidiEventConverter::setSetting (IN String& key,
     _MidiEventConverterDescriptor& descriptor =
         TOREFERENCE<_MidiEventConverterDescriptor>(_descriptor);
     Boolean isOkay = descriptor.setSetting(key, value);
-    
+   
     Logging_trace1("<<: %1", TOSTRING(isOkay));
     return isOkay;
 }
@@ -834,12 +925,14 @@ Boolean MidiEventConverter::setSettings (IN Dictionary& dictionary)
 
     _MidiEventConverterDescriptor& descriptor =
         TOREFERENCE<_MidiEventConverterDescriptor>(_descriptor);
-
     Boolean isOkay = true;
 
     for (const auto& [key, value]: dictionary) {
-        Boolean settingIsOkay = descriptor.setSetting(key, value);
-        isOkay = isOkay && settingIsOkay;
+        isOkay = descriptor.setSetting(key, value);
+
+        if (!isOkay) {
+            break;
+        }
     }
 
     Logging_trace1("<<: %1", TOSTRING(isOkay));
@@ -853,15 +946,19 @@ Boolean MidiEventConverter::setSettings (IN Dictionary& dictionary)
 void
 MidiEventConverter::prepareToPlay
                         (IN Real dataPointRate,
-                         IN Natural maximumExpectedDataPointsPerBlock)
+                         IN Natural maximumExpectedDataPointsPerBlock,
+                         IN Boolean isRealtime)
 {
-    Logging_trace2(">>: dataPointRate = %1, dataPointsPerBlock = %2",
+    Logging_trace3(">>: dataPointRate = %1, dataPointsPerBlock = %2,"
+                   " isRealtime = %3",
                    TOSTRING(dataPointRate),
-                   TOSTRING(maximumExpectedDataPointsPerBlock));
+                   TOSTRING(maximumExpectedDataPointsPerBlock),
+                   TOSTRING(isRealtime));
 
     _MidiEventConverterDescriptor& descriptor =
         TOREFERENCE<_MidiEventConverterDescriptor>(_descriptor);
-    descriptor.setSetting("synth.sample-rate", TOSTRING(dataPointRate));
+    descriptor.processingIsInRealtime = isRealtime;
+    setSetting("synth.sample-rate", TOSTRING(dataPointRate));
 
     Logging_trace("<<");
 }
@@ -880,11 +977,11 @@ void
 MidiEventConverter::processBlock
                         (IN MidiEventList& midiEventList,
                          INOUT AudioDataPointListVector& audioBuffer,
-                         IN Natural dataPointCountInChannel)
+                         IN Natural frameCount)
 {
-    Logging_trace2(">>: midiEventList = %1, dataPointCountInChannel = %2",
+    Logging_trace2(">>: midiEventList = %1, frameCount = %2",
                    midiEventList.toString(),
-                   TOSTRING(dataPointCountInChannel));
+                   TOSTRING(frameCount));
 
     _MidiEventConverterDescriptor& descriptor =
         TOREFERENCE<_MidiEventConverterDescriptor>(_descriptor);
@@ -893,7 +990,7 @@ MidiEventConverter::processBlock
 
     /* calculate the times (in data points) */
     Natural currentTimeInDataPoints = 0;
-    const Natural endTimeInDataPoints = dataPointCountInChannel;
+    const Natural endTimeInDataPoints = frameCount;
     Natural eventIndex = 0;
 
     while (currentTimeInDataPoints < endTimeInDataPoints) {
@@ -916,14 +1013,9 @@ MidiEventConverter::processBlock
                                  durationToNextEventInDataPoints);
         }
 
-        if (!descriptor.synthesizerIsAvailable) {
-            audioBuffer.setToZero();
-        } else {
-            synthesizer->process(audioBuffer,
-                                 currentTimeInDataPoints,
-                                 intervalDurationInDataPoints);
-        }
-
+        synthesizer->process(audioBuffer,
+                             currentTimeInDataPoints,
+                             intervalDurationInDataPoints);
         currentTimeInDataPoints += intervalDurationInDataPoints;
     }
 
@@ -971,15 +1063,9 @@ void MidiEventConverter::setStateInformation (IN String& st)
     /* restores state of audio processor from <C>st</C> */
     _MidiEventConverterDescriptor& descriptor =
         TOREFERENCE<_MidiEventConverterDescriptor>(_descriptor);
-    descriptor.resetSettings();
-
     Dictionary d = Dictionary::makeFromString(st);
-    StringList keyList = Dictionary::makeKeyListFromString(st);
-
-    for (String key : keyList) {
-        String value = d.at(key);
-        descriptor.setSetting(key, value);
-    }
+    descriptor.resetSettings();
+    setSettings(d);
 
     Logging_trace("<<");
 }

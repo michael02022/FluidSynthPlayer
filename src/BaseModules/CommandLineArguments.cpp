@@ -158,21 +158,18 @@ void _lookupArgument (IN String& argument,
 {
     Logging_trace1(">>: %1", argument);
 
-    String defaultAbstractionData;
     String lookupKey;
 
     if (STR::startsWith(argument, "-")) {
         /* this is an option, because it starts with a dash */
         Boolean containsEqualSign =
             STR::splitAt(argument, "=", originalName, embeddedParameter);
-        defaultAbstractionData = "ERR_UNKNOWN_OPTION/0/-";
         lookupKey = originalName + (containsEqualSign ? "=" : "");
     } else {
         /* everything not starting with a dash is a file name */
         originalName = argument;
         embeddedParameter = "";
 
-        defaultAbstractionData = "ERR_BADFILE/0/-";
         const String namePrefix = "NAME:*";
         String lowercasedArgument = STR::toLowercase(argument);
         Natural dotPosition = STR::findFromEnd(lowercasedArgument, ".");

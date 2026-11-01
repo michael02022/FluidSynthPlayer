@@ -44,7 +44,7 @@ namespace Libraries::FluidSynth {
          * @param[in] synthesizer   the fluidsynth synthesizer object
          * @param[in] levelFromTop  the distance to the top of stack
          *                          for this SoundFont
-         * @return 
+         * @return soundfont object
          */
         FluidSynthSoundFont (IN FluidSynthSynthesizer* synthesizer,
                              IN Natural levelFromTop = 0);

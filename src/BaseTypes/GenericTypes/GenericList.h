@@ -17,9 +17,11 @@
 /*=========*/
 
 #include <iterator>
+#include <numeric>
 #include <vector>
 
 #include "Boolean.h"
+#include "Configuration.h"
 #include "ElementToStringProc.h"
 #include "Integer.h"
 #include "StringProc.h"
@@ -27,10 +29,10 @@
 /*--------------------*/
 
 using std::vector;
+using BaseModules::Configuration;
 using BaseTypes::GenericTypes::ElementToStringProc;
 using BaseTypes::GenericTypes::StringProc;
 using BaseTypes::Primitives::Boolean;
-using BaseTypes::Primitives::Natural;
 using BaseTypes::Primitives::Integer;
 
 /*====================*/
@@ -157,8 +159,14 @@ namespace BaseTypes::GenericTypes {
         String toString (IN Boolean typeNameIsUsed = true) const
         {
             String result = "";
+            const Natural count =
+                Natural::minimum(length(),
+                                 Configuration::presentedListElementCount());
+            const String suffix = (count == length()
+                                   ? ""
+                                   : ", ...");
 
-            for (Natural i = 0;  i < length();  i++) {
+            for (Natural i = 0;  i < count;  i++) {
                 result += (i == 0 ? "" : ", ");
 
                 if (elementToString == nullptr) {
@@ -169,7 +177,7 @@ namespace BaseTypes::GenericTypes {
                 }
             }
 
-            result = "(" + result + ")";
+            result = "(" + result + suffix + ")";
 
             if (typeNameIsUsed) {
                 String typeName = (nameOfType == nullptr ? "List"
@@ -436,6 +444,28 @@ namespace BaseTypes::GenericTypes {
         }
 
         /*--------------------*/
+        /* iteration          */
+        /*--------------------*/
+
+        /**
+         * Accumulates data using binary function <C>op</C> across the
+         * elements of current list with <C>startValue</C> and returns
+         * accumulated result.
+         *
+         * @param[in]  startValue  start value
+         * @param[in]  op          binary operation combining intermediate
+         *                         value with transformed list element
+         * @return  accumulated result
+         */
+        template <typename ResultType, typename BinaryOp>
+        ResultType accumulate (IN ResultType startValue,
+                               IN BinaryOp op) const
+        {
+                return std::accumulate(this->cbegin(),
+                                       this->cend(), startValue, op);
+        }       
+        
+        /*--------------------*/
 
         /**
          * A <C>Comparator</C> type compares two objects and returns
@@ -564,6 +594,8 @@ namespace BaseTypes::GenericTypes {
             return result;
         }
 
+        /*--------------------*/
+        /* complex functions  */
         /*--------------------*/
 
         /**

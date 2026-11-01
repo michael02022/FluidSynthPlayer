@@ -30,9 +30,6 @@ using STR = BaseModules::StringUtil;
   * not found  */
 static const size_t _notFound = std::string::npos;
 
-/** the character representing a blank character */
-static const Character _blankCharacter{' '};
-
 /** the character representing a minus sign in a number */
 static const Character _minusCharacter{'-'};
 
@@ -381,7 +378,9 @@ Boolean StringUtil::isReal (IN String& st)
     Boolean result;
     const Natural stringLength = st.length();
     const Boolean hasSign =
-        STR::contains(_signCharacterList, STR::firstCharacter(st));
+        (stringLength == 0
+         ? Boolean{false}
+         : STR::contains(_signCharacterList, STR::firstCharacter(st)));
 
     if (stringLength == 0) {
         result = false;
@@ -401,7 +400,7 @@ Boolean StringUtil::isReal (IN String& st)
 
             if (state == State::atMantissaSign) {
                 if (ch == _plusCharacter || ch == _minusCharacter
-                    || ch == _blankCharacter || _isDigitChar(ch)) {
+                    || ch == blankCharacter || _isDigitChar(ch)) {
                     state = State::inIntegralPart;
                 } else if (ch == _decimalPointCharacter) {
                     state = State::inFractionalPart;
@@ -516,19 +515,22 @@ void StringUtil::replace (INOUT String& st,
                           IN String& replacement)
 {
     const Natural patternLength = pattern.length();
-    const Natural replacementLength = replacement.length();
-    Natural position = 0;
 
-    while (true) {
-        position = st.find(pattern, size_t(position));
+    if (patternLength > 0) {
+        const Natural replacementLength = replacement.length();
+        Natural position = 0;
 
-        if (position == _notFound) {
-            break;
+        while (true) {
+            position = st.find(pattern, size_t(position));
+
+            if (position == _notFound) {
+                break;
+            }
+
+            st.replace(size_t(position), size_t(patternLength),
+                       replacement);
+            position += replacementLength;
         }
-
-        st.replace(size_t(position), size_t(patternLength),
-                   replacement);
-        position += replacementLength;
     }
 }
 
@@ -862,3 +864,12 @@ std::wstring StringUtil::toWideString (IN String& st)
     std::mbsrtowcs(wCharPtr, &charPtr, length, &state);
     return result;
 }
+
+/*--------------------*/
+/* constants          */
+/*--------------------*/
+
+const Character StringUtil::blankCharacter{' '};
+const Character StringUtil::doubleQuoteCharacter{'"'};
+const String    StringUtil::newlineString{"\n"};
+const Character StringUtil::tabulatorCharacter{'\t'};

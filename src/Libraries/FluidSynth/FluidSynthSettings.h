@@ -16,9 +16,11 @@
 /*=========*/
 
 #include "FluidSynth.h"
+#include "Dictionary.h"
 
 /*--------------------*/
 
+using BaseTypes::Containers::Dictionary;
 using Libraries::FluidSynth::FluidSynth;
 
 /*====================*/
@@ -30,6 +32,10 @@ namespace Libraries::FluidSynth {
      * settings object
      */
     struct FluidSynthSettings {
+
+        /*--------------------*/
+        /* con-/destruction   */
+        /*--------------------*/
 
         /**
          * Constructor for settings using an underlying fluidsynth
@@ -45,16 +51,28 @@ namespace Libraries::FluidSynth {
         ~FluidSynthSettings ();
 
         /*--------------------*/
+        /* property access    */
+        /*--------------------*/
 
         /**
-         * Sets setting given by <C>key</C> to new value given by
-         * <C>value</C>; the value type is adjusted internally.
+         * Returns the default mapping from keys to values for the
+         * fluidsynth settings.
          *
-         * @param[in] key    settings name
-         * @param[in] value  value for key as string
-         * @return  information whether setting was successful
+         * @return  map of default values for all keys relevant for
+         *          initialization
          */
-        Boolean set (IN String& key, IN String& value);
+        static const Dictionary& keyToDefaultValueMap ();
+        
+        /*--------------------*/
+
+        /**
+         * Returns the default mapping from keys to values for the
+         * fluidsynth settings.
+         *
+         * @return  map of default values for all keys relevant for
+         *          initialization
+         */
+        static const StringList& restartingKeysList (); 
 
         /*--------------------*/
 
@@ -65,6 +83,20 @@ namespace Libraries::FluidSynth {
          * @return  underlying fluidsynth settings object
          */
         Object underlyingObject () const;
+
+        /*--------------------*/
+        /* change             */
+        /*--------------------*/
+
+        /**
+         * Sets setting given by <C>key</C> to new value given by
+         * <C>value</C>; the value type is adjusted internally.
+         *
+         * @param[in] key    settings name
+         * @param[in] value  value for key as string
+         * @return  information whether setting was successful
+         */
+        Boolean set (IN String& key, IN String& value);
 
         /*--------------------*/
 

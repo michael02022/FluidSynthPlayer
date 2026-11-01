@@ -26,7 +26,7 @@ namespace C_SystemTime {
 
     /** qualified version of timespec_get from time */
     void currentClockTime (TimeSpec& ts) {
-        timespec_get((timespec *)(&ts), TIME_UTC);
+        timespec_get(static_cast<timespec*>(&ts), TIME_UTC);
     }
 
 }

@@ -19,7 +19,7 @@
 
 /*--------------------*/
 
-using BaseTypes::Containers::copyArray;
+using BaseTypes::Containers::Array_copy;
 using Audio::AudioDataPointFifoQueue;
 
 /*====================*/
@@ -196,7 +196,7 @@ AudioDataPointFifoQueue::toArray (OUT AudioDataPoint* elementArray) const
 
     /* directly access the underlying array */
     const AudioDataPoint* sourcePtr = _data.data();
-    copyArray(elementArray, sourcePtr, _length);
+    Array_copy(elementArray, sourcePtr, _length);
 
     Logging_trace("<<");
 }

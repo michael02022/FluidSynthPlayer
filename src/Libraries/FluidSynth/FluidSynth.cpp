@@ -22,6 +22,19 @@
 using Libraries::DynamicLibrary;
 using Libraries::FluidSynth::FluidSynth;
 
+/*-----------*/
+/* constants */
+/*-----------*/
+
+/** the library name for the fluidsynth dynamic library */
+#if defined(_WINDOWS)
+    #define _libraryName "libfluidsynth-3.dll"
+#elif defined(APPLE)
+    #define _libraryName "@loader_path/libfluidsynth.3.dylib"
+#else
+    #define _libraryName "libfluidsynth.so.3"
+#endif
+
 /*-----------------------------------------*/
 /* TYPES AND FUNCTIONS FOR DYNAMIC BINDING */
 /*-----------------------------------------*/
@@ -29,11 +42,45 @@ using Libraries::FluidSynth::FluidSynth;
 /** version function type in library */
 typedef char* (*FSynth_VersionProc)(void);
 
-/** version function in library */
-static FSynth_VersionProc FSynth_version = NULL;
+/*--------------------*/
 
-/** flag to tell whether function pointers have been initialized */
-static Boolean _functionsAreInitialized = false;
+namespace Libraries::FluidSynth {
+
+    /** the associated descriptor object type */
+    struct _FluidSynthDescriptor {
+
+        /** the fluidsynth library */
+        DynamicLibrary* library;
+
+        /** the fluid synth version proc */
+        FSynth_VersionProc fluidSynthVersion;
+
+        /*--------------------*/
+        /* con-/destruction   */
+        /*--------------------*/
+
+        /**
+         * Connects functions dynamically to functions from 
+         * <C>fsLibrary</C>
+         *
+         * @param[in] fsLibrary  underlying fluidsynth library
+         */
+        _FluidSynthDescriptor (IN DynamicLibrary* fsLibrary);
+
+        /*--------------------*/
+
+        /**
+         * Finalizes descriptor
+         */
+        ~_FluidSynthDescriptor ();
+
+    };
+    
+}
+
+/*====================*/
+
+using Libraries::FluidSynth::_FluidSynthDescriptor;
 
 /*--------*/
 /* MACROS */
@@ -45,41 +92,39 @@ static Boolean _functionsAreInitialized = false;
 
 /** simple macro for dynamic binding of a function */
 #define GPA(signature, name) \
-    (signature)((DynamicLibrary*) fsLibrary)->getFunctionByName(name)
+    reinterpret_cast<signature>(library->getFunctionByName(name))
 
-/*====================*/
-/* PRIVATE FEATURES    */
-/*====================*/
+/*=======================*/
+/* _FluidSynthDescriptor */
+/*=======================*/
 
-/** the library name for the fluidsynth dynamic library */
-#if defined(_WINDOWS)
-    #define _libraryName "libfluidsynth-3.dll"
-#elif defined(APPLE)
-    #define _libraryName "@loader_path/libfluidsynth.3.dylib"
-#else
-    #define _libraryName "libfluidsynth.so.3"
-#endif
-
-/*--------------------*/
-
-/**
- * Connects static functions dynamically to functions from DLL
- * <C>fsLibrary</C>
- *
- * @param[in] fsLibrary  underlying fluidsynth library
- */
-static void _initializeFunctionsForLibrary (IN Object fsLibrary)
+_FluidSynthDescriptor::_FluidSynthDescriptor (IN DynamicLibrary* fsLibrary)
 {
     Logging_trace(">>");
 
-    if (fsLibrary == NULL) {
+    library = const_cast<DynamicLibrary*>(fsLibrary);
+
+    if (library == nullptr) {
         Logging_traceError("fluidsynth library not loaded");
-    } else if (!_functionsAreInitialized) {
-        FSynth_version =
+    } else {
+        fluidSynthVersion =
             GPA(FSynth_VersionProc, "fluid_version_str");
-        _functionsAreInitialized = true;
     }
     
+    Logging_trace("<<");
+}
+
+/*--------------------*/
+
+_FluidSynthDescriptor::~_FluidSynthDescriptor ()
+{
+    Logging_trace(">>");
+
+    if (library != nullptr) {
+        delete library;
+        library = nullptr;
+    }
+
     Logging_trace("<<");
 }
 
@@ -88,19 +133,13 @@ static void _initializeFunctionsForLibrary (IN Object fsLibrary)
 /*====================*/
 
 FluidSynth::FluidSynth ()
-    : _descriptor{NULL}
+    : _descriptor{nullptr}
 {
     Logging_trace(">>");
 
     DynamicLibrary* library = new DynamicLibrary(_libraryName);
-    _descriptor = library;
-
+    _descriptor = new _FluidSynthDescriptor(library);
     Boolean libraryIsLoaded = library->isLoaded();
-
-    if (libraryIsLoaded) {
-        _initializeFunctionsForLibrary(library);
-    }
-
     const String message = (libraryIsLoaded
                             ? "library loaded"
                             : "could not load library");
@@ -113,12 +152,7 @@ FluidSynth::FluidSynth ()
 FluidSynth::~FluidSynth ()
 {
     Logging_trace(">>");
-
-    if (_descriptor != NULL) {
-        DynamicLibrary* library = (DynamicLibrary*) _descriptor;
-        delete library;
-    }
-
+    delete reinterpret_cast<_FluidSynthDescriptor*>(_descriptor);
     Logging_trace("<<");
 }
 
@@ -127,8 +161,9 @@ FluidSynth::~FluidSynth ()
 Boolean FluidSynth::isLoaded () const
 {
     Logging_trace(">>");
-    const DynamicLibrary* library =
-        static_cast<DynamicLibrary*>(_descriptor);
+    _FluidSynthDescriptor& descriptor =
+        TOREFERENCE<_FluidSynthDescriptor>(_descriptor);
+    const DynamicLibrary* library = descriptor.library;
     Boolean result = library->isLoaded();
     Logging_trace1("<<: %1", TOSTRING(result));
     return result;
@@ -142,11 +177,16 @@ String FluidSynth::version () const
 
     String result = "???";
 
-    if (_descriptor != NULL) {
-        if (FSynth_version == NULL) {
+    if (_descriptor != nullptr) {
+        _FluidSynthDescriptor& descriptor =
+            TOREFERENCE<_FluidSynthDescriptor>(_descriptor);
+        FSynth_VersionProc fluidSynthVersion =
+            descriptor.fluidSynthVersion;
+
+        if (fluidSynthVersion == nullptr) {
             reportBadFunction("version");
         } else {
-            result = String{FSynth_version()};
+            result = String{fluidSynthVersion()};
         }
     }
 
@@ -159,6 +199,9 @@ String FluidSynth::version () const
 Object FluidSynth::underlyingObject () const
 {
     Logging_trace(">>");
+    _FluidSynthDescriptor& descriptor =
+        TOREFERENCE<_FluidSynthDescriptor>(_descriptor);
+    DynamicLibrary* result = descriptor.library;
     Logging_trace("<<");
-    return _descriptor;
+    return result;
 }

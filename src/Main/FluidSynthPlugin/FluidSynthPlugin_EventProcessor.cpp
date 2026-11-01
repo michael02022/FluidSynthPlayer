@@ -17,6 +17,7 @@
 #include "Environment.h"
 #include "FluidSynthPlugin_Editor.h"
 #include "MidiEventConverter.h"
+#include "Mutex.h"
 #include "MyArray.h"
 #include "Logging.h"
 #include "Integer.h"
@@ -28,8 +29,9 @@ using Audio::AudioDataPointList;
 using Audio::AudioDataPointFifoQueueVector;
 using BaseModules::Environment;
 using BaseModules::OperatingSystem;
-using BaseTypes::Containers::convertArray;
+using BaseTypes::Containers::Array_convert;
 using BaseTypes::Primitives::Integer;
+using BaseTypes::Primitives::Mutex;
 using Libraries::DynamicLibrary;
 using MIDI::MidiEventConverter;
 using Main::FluidSynthPlugin::FluidSynthPlugin_Editor;
@@ -159,6 +161,10 @@ namespace Main::FluidSynthPlugin {
         /** the associated midi event converter for this processor */
         MidiEventConverter* midiEventConverter;
 
+        /** a mutex synchronizing parameter change and audio
+         * processing */
+        Mutex mutex;
+
         /** the settings string for this processor */
         String settingsString;
 
@@ -179,6 +185,8 @@ namespace Main::FluidSynthPlugin {
         _RingBuffer ringBuffer;
 
         /*--------------------*/
+        /* con-/destruction   */
+        /*--------------------*/
 
         /**
          * Creates a new descriptor
@@ -192,6 +200,15 @@ namespace Main::FluidSynthPlugin {
         /*--------------------*/
 
         /**
+         * Destroy a descriptor
+         */
+        ~_EventProcessorDescriptor ();
+
+        /*--------------------*/
+        /* property access    */
+        /*--------------------*/
+
+        /**
          * Tells whether the underlying converter has been
          * correctly set up (e.g. by loading the dynamic libraries).
          *
@@ -201,11 +218,21 @@ namespace Main::FluidSynthPlugin {
         Boolean isCorrectlyInitialized () const;
         
         /*--------------------*/
+        /* change             */
+        /*--------------------*/
 
         /**
-         * Destroy a descriptor
+         * Processes a list of MIDI events with this converter and
+         * updates audio data point buffer assuming a stereo setup.
+         *
+         * @param[in]    midiEventList  list of MIDI messages to be
+         *                              processed
+         * @param[inout] audioBuffer    vector of data point lists
+         * @param[in]    frameCount     relevant count of data frames
          */
-        ~_EventProcessorDescriptor ();
+        void processBlock (IN MidiEventList& midiEventList,
+                           INOUT AudioDataPointListVector& audioBuffer,
+                           IN Natural frameCount);
 
         /*--------------------*/
 
@@ -265,7 +292,7 @@ _RingBuffer::processBlock
 
     if (currentTime != lastProcessedTime) {
         const Natural relativeTime =
-            Natural{(size_t) currentTime} % synthesizerBufferSize;
+            Natural{size_t(currentTime)} % synthesizerBufferSize;
         Logging_trace1("--: relativeTime = %1", TOSTRING(relativeTime));
         dataPointQueueList.setQueueCount(channelCount);
         dataPointQueueList.ensureQueueCapacity(synthesizerBufferSize);
@@ -282,7 +309,7 @@ _RingBuffer::processBlock
                                   relativeTime, localDataPointBuffer);
             delayDurationInDataPoints = relativeTime;
             scheduledEventList.clear();
-            processor->setLatencySamples((int) delayDurationInDataPoints);
+            processor->setLatencySamples(int(delayDurationInDataPoints));
             dataPointQueueList.appendToQueues(localDataPointBuffer,
                                            0, delayDurationInDataPoints);
         }
@@ -306,9 +333,9 @@ _RingBuffer::processBlock
         currentEventList = scheduledEventList;
         _splitListAtTime(currentEventList,
                          durationInDataPoints, scheduledEventList);
-        eventConverter->processBlock(currentEventList,
-                                     localDataPointBuffer,
-                                     durationInDataPoints);
+        descriptor.processBlock(currentEventList,
+                                localDataPointBuffer,
+                                durationInDataPoints);
         Logging_trace1("--: localDataPointBufferC = %1",
                        localDataPointBuffer.toString(durationInDataPoints,
                                                      true));
@@ -329,6 +356,10 @@ _RingBuffer::processBlock
 /*===========================*/
 /* _EventProcessorDescriptor */
 /*===========================*/
+
+/*--------------------*/
+/* con-/destruction   */
+/*--------------------*/
 
 _EventProcessorDescriptor::_EventProcessorDescriptor
     (FluidSynthPlugin_EventProcessor* parent)
@@ -353,6 +384,8 @@ _EventProcessorDescriptor::~_EventProcessorDescriptor ()
 }
 
 /*--------------------*/
+/* property access    */
+/*--------------------*/
 
 Boolean _EventProcessorDescriptor::isCorrectlyInitialized () const
 {
@@ -363,10 +396,38 @@ Boolean _EventProcessorDescriptor::isCorrectlyInitialized () const
 }
 
 /*--------------------*/
+/* change             */
+/*--------------------*/
+
+void
+_EventProcessorDescriptor::processBlock
+                               (IN MidiEventList& midiEventList,
+                                INOUT AudioDataPointListVector& audioBuffer,
+                                IN Natural frameCount)
+{
+    Logging_trace(">>");
+
+    if (!mutex.try_lock()) {
+        /* still in settings mode --> return empty buffer */
+        audioBuffer.setToZero();
+    } else {
+        midiEventConverter->processBlock(midiEventList, audioBuffer,
+                                         frameCount);
+        mutex.unlock();
+    }
+    
+    Logging_trace("<<");
+}
+
+/*--------------------*/
 
 void _EventProcessorDescriptor::setSettings (IN String& st)
 {
     Logging_trace1(">>: %1", st);
+
+    /* ensure that no processing is possible when settings are
+     * changed */
+    mutex.lock();
 
     Boolean libraryIsAvailable = isCorrectlyInitialized();
     errorMessageList.clear();
@@ -378,30 +439,51 @@ void _EventProcessorDescriptor::setSettings (IN String& st)
     midiEventConverter->resetSettings();
     settingsString = st;
 
+    /* initialize settings map with default values */
+    const Dictionary& keyToDefaultValueMap =
+        MidiEventConverter::settingsKeyToDefaultValueMap();
+
+    /* update settings map with settings from <C>st</C> */
     const String entrySeparator{"#"};
     const String nlSt = STR::newlineReplacedString(st, entrySeparator);
-    Dictionary d =
-        Dictionary::makeFromString(nlSt, entrySeparator, "=");
-    StringList keyList = 
+    const StringList& providedKeyList =
         Dictionary::makeKeyListFromString(nlSt, entrySeparator, "=");
+    const StringList defaultedKeyList =
+        StringList::difference(keyToDefaultValueMap.keyList(),
+                               providedKeyList);
+    const Dictionary& newValueMap =
+        Dictionary::makeFromString(nlSt, entrySeparator, "=");
 
-    for (String key : keyList) {
-        String value = Environment::expand(d.at(key));
+    /* first pass writes all values with keys not in provided key
+     * list, seconds pass writes values for that key list */
+    for (Natural pass = 0;  pass < 2;  pass++) {
+        const Boolean isPassForDefaults = (pass == 0);
+        const StringList& keyList =
+            (isPassForDefaults ? defaultedKeyList : providedKeyList);
+        const Dictionary& dictionary =
+            (isPassForDefaults ? keyToDefaultValueMap : newValueMap);
+        
+        for (const String& key : keyList) {
+            String value = Environment::expand(dictionary.at(key));
 
-        if (key == _fsBufferingCompensationKey) {
-            fluidSynthBufferingIsCompensated =
-                (STR::toLowercase(value) == "true");
-        } else {
-            Boolean isOkay = midiEventConverter->setSetting(key, value);
+            if (key == _fsBufferingCompensationKey) {
+                fluidSynthBufferingIsCompensated =
+                    (STR::toLowercase(value) == "true");
+            } else {
+                Boolean isOkay =
+                    midiEventConverter->setSetting(key, value);
 
-            if (libraryIsAvailable && !isOkay) {
-                String errorMessage =
-                    STR::expand("cannot set '%1' to '%2'", key, value);
-                errorMessageList.append(errorMessage);
+                if (libraryIsAvailable && !isPassForDefaults && !isOkay) {
+                    String errorMessage =
+                        STR::expand("cannot set '%1' to '%2'",
+                                    key, value);
+                    errorMessageList.append(errorMessage);
+                }
             }
         }
     }
 
+    mutex.unlock();
     Logging_trace("<<");
 }
 
@@ -426,7 +508,7 @@ _convertFromJuceEventList(IN juce::MidiBuffer& juceMidiEventList)
 
     /* traverse all the events */
     for (juce::MidiMessageMetadata metadata : juceMidiEventList) {
-        Natural eventTime{(size_t) metadata.samplePosition};
+        Natural eventTime{size_t(metadata.samplePosition)};
         const juce::uint8* byteList = metadata.data;
         ByteList midiDataList;
 
@@ -466,8 +548,8 @@ _copyToJuceBuffer (IN AudioDataPointListVector dataPointListVector,
         const AudioDataPoint* dataPointList =
             dataPointListVector[channel].asArray();
         T* otherDataPointList =
-            (T*) audioBuffer.getWritePointer((int) channel);
-        convertArray(otherDataPointList, dataPointList, frameCount);
+            (T*) audioBuffer.getWritePointer(int(channel));
+        Array_convert(otherDataPointList, dataPointList, frameCount);
     }
 }
 
@@ -495,30 +577,31 @@ _processBlock (INOUT FluidSynthPlugin_EventProcessor* processor,
 {
     Logging_trace(">>");
 
-    Integer currentTime = _readTimeInDataPoints(processor->getPlayHead());
+    const Natural channelCount =
+        Natural{size_t(audioBuffer.getNumChannels())};
+    const Natural audioFrameCount =
+        Natural{size_t(audioBuffer.getNumSamples())};
+    AudioDataPointListVector dataPointListVector{channelCount};
+    dataPointListVector.setFrameCount(audioFrameCount);
+    Integer currentTime =
+        _readTimeInDataPoints(processor->getPlayHead());
 
     /* provide a data point list vector from audioBuffer */
     MidiEventList midiEventList =
         _convertFromJuceEventList(juceMidiEventList);
-    const Natural channelCount =
-        Natural{(size_t) audioBuffer.getNumChannels()};
-    const Natural audioFrameCount =
-        Natural{(size_t) audioBuffer.getNumSamples()};
-    AudioDataPointListVector dataPointListVector{channelCount};
-    dataPointListVector.setFrameCount(audioFrameCount);
 
     if (!descriptor.fluidSynthBufferingIsCompensated) {
         /* do a direct processing of the events to a data point list
          * vector */
-        MidiEventConverter* eventConverter =
-            descriptor.midiEventConverter;
-        eventConverter->processBlock(midiEventList,
-                                     dataPointListVector, audioFrameCount);
+        descriptor.processBlock(midiEventList,
+                                dataPointListVector,
+                                audioFrameCount);
     } else {
         _RingBuffer& ringBuffer = descriptor.ringBuffer;
         ringBuffer.processBlock(processor, descriptor,
                                 currentTime, midiEventList,
-                                dataPointListVector, audioFrameCount);
+                                dataPointListVector,
+                                audioFrameCount);
     }
 
     Logging_trace1("--: currentDataPoints = %1",
@@ -542,7 +625,7 @@ static Integer _readTimeInDataPoints (juce::AudioPlayHead* playHead)
 
     if (playHead != nullptr) {
         currentTimeInDataPoints =
-            (int) *(playHead->getPosition()->getTimeInSamples());
+            int(*(playHead->getPosition()->getTimeInSamples()));
     }
 
     return currentTimeInDataPoints;
@@ -645,7 +728,7 @@ FluidSynthPlugin_EventProcessor::FluidSynthPlugin_EventProcessor ()
                            .withOutput("Output",
                                        juce::AudioChannelSet::stereo(),
                                        true)),
-      _descriptor{NULL}
+      _descriptor{nullptr}
 {
     Logging_initializeWithDefaults("FluidSynthPlugin",
                                    "FluidSynthPlugin.");
@@ -727,7 +810,7 @@ int FluidSynthPlugin_EventProcessor::getCurrentProgram ()
 {
     _EventProcessorDescriptor& descriptor =
         TOREFERENCE<_EventProcessorDescriptor>(_descriptor);
-    return (int) descriptor.currentProgramIndex;
+    return int(descriptor.currentProgramIndex);
 }
 
 /*--------------------*/
@@ -960,8 +1043,8 @@ FluidSynthPlugin_EventProcessor::getStateInformation
     /* stores state of processor in <C>destData</C> */
     const String st = settings();
     const Natural sizeInBytes = st.size();
-    destData.setSize((int) sizeInBytes);
-    destData.copyFrom(st.c_str(), 0, (int) sizeInBytes);
+    destData.setSize(int(sizeInBytes));
+    destData.copyFrom(st.c_str(), 0, int(sizeInBytes));
 
     Logging_trace1("<<: settings = %1", STR::newlineReplacedString(st));
 }
@@ -987,20 +1070,23 @@ FluidSynthPlugin_EventProcessor::setStateInformation (IN void* data,
 
 void
 FluidSynthPlugin_EventProcessor::prepareToPlay
-    (IN double dataPointRate, IN int maximumExpectedDataPointsPerBlock)
+    (IN double dataPointRate, IN int maximumFrameCount)
 {
     const Real sRate{dataPointRate};
-    Natural dataPointCount{maximumExpectedDataPointsPerBlock};
-    Logging_trace2(">>: dataPointRate = %1, dataPointsPerBlock = %2",
-                   TOSTRING(sRate), TOSTRING(dataPointCount));
+    Natural frameCount{maximumFrameCount};
+    Logging_trace2(">>: dataPointRate = %1, frameCount = %2",
+                   TOSTRING(sRate), TOSTRING(frameCount));
 
+    const Boolean isInRealtime =
+        isRealtime() == juce::AudioProcessor::Realtime::yes;
     Integer currentTime = _readTimeInDataPoints(getPlayHead());
     Logging_trace1("--: currentTime = %1 [dataPoints]",
                    TOSTRING(currentTime));
 
     _EventProcessorDescriptor& descriptor =
         TOREFERENCE<_EventProcessorDescriptor>(_descriptor);
-    descriptor.midiEventConverter->prepareToPlay(sRate, dataPointCount);
+    descriptor.midiEventConverter->prepareToPlay(sRate, frameCount,
+                                                 isInRealtime);
 
     Logging_trace("<<");
 }

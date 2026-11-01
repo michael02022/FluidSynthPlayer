@@ -167,7 +167,8 @@ namespace BaseModules {
              *
              * @return information about being in DST
              */
-            Boolean _isDST () {
+            Boolean _isDST () const 
+            {
                 Natural secondsSinceEpoch = systemTime() / 1000;
                 Natural secondsPerYear    = 86400 * 1461 / 4;
                 Natural secondsPerQuarter = secondsPerYear / 4;
@@ -277,7 +278,7 @@ namespace BaseModules {
              *
              * @return  current system time in milliseconds
              */
-            _Timestamp systemTime ()
+            _Timestamp systemTime () const
             {
                 const system_clock::duration d =
                     system_clock::now().time_since_epoch();
@@ -326,7 +327,7 @@ static String _ignoredFunctionNamePrefix = "";
 
 /** the function to be directly called when logging (e.g. for embedded
  * systems) */
-static LoggingCallbackFunction _callbackFunction = NULL;
+static LoggingCallbackFunction _callbackFunction = nullptr;
 
 /*--------------------*/
 
@@ -420,7 +421,7 @@ void _appendEntryToBuffer (IN String& functionSignature,
         _LoggingBufferEntry bufferEntry{functionSignature, time,
                                         _currentThreadID(), message};
 
-        if (_callbackFunction != NULL) {
+        if (_callbackFunction != nullptr) {
             String st = _bufferEntryToString(bufferEntry);
             _callbackFunction(st);
         } else {

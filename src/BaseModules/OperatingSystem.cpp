@@ -61,7 +61,7 @@ using STR = BaseModules::StringUtil;
         Windows::HMODULE component;
 
         if (isExecutable) {
-            component = NULL;
+            component = nullptr;
         } else {
             Windows::DWORD flags =
                 (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | 
@@ -87,7 +87,7 @@ using STR = BaseModules::StringUtil;
      */
     static void _sleepForDuration (IN float duration)
     {
-        Windows::Sleep(round(duration * 1000.0));
+        Windows::Sleep((Windows::DWORD) round(duration * 1000.0));
     }
 #else
 
@@ -110,13 +110,15 @@ using STR = BaseModules::StringUtil;
         if (isExecutable) {
             ssize_t effectiveLength;
             constexpr size_t length = 1000;
-            char executablePath[length];
+            char executablePath[length + 1];
             effectiveLength = readlink("/proc/self/exe", executablePath,
                                        length);
-            result = std::string(executablePath);
+            executablePath[length] = '\0';
 
             if (effectiveLength < 0 || effectiveLength == length) {
                 Logging_traceError("--: readlink failed");
+            } else {
+                result = std::string(executablePath);
             }
         } else {
             Dl_info libraryData;
@@ -126,6 +128,7 @@ using STR = BaseModules::StringUtil;
             result = isOkay ? TOSTRING(libraryData.dli_fname) : "";
         }
 
+        result = OperatingSystem::dirname(result);
         return result;
     }
 
@@ -160,7 +163,7 @@ static Boolean _environmentValue (IN String& variableName,
     char* envValue = std::getenv(variableName.c_str());
     Boolean result = false;
 
-    if (envValue != NULL) {
+    if (envValue != nullptr) {
         result = true;
         value = String{envValue};
     }
@@ -311,7 +314,7 @@ void OperatingSystem::sleep (IN Duration duration)
 
     while (stopTime < endTime) {
         stopTime = Time_withinProcess();
-        _sleepForDuration(double(duration) / 10.0);
+        _sleepForDuration(float(duration / 10.0));
     }
 }
 

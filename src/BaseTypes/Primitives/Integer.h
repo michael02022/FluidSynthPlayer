@@ -107,7 +107,7 @@ namespace BaseTypes::Primitives {
          */
         explicit operator float () const
         {
-            return (float) _value;
+            return float(_value);
         }
 
         /*--------------------*/
@@ -219,7 +219,7 @@ namespace BaseTypes::Primitives {
          */
         Integer operator ++ ()
         {
-            return Integer{--_value};
+            return Integer{++_value};
         }
 
         /*--------------------*/

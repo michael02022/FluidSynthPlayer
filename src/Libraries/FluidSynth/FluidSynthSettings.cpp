@@ -13,14 +13,12 @@
 /*=========*/
 
 #include "Logging.h"
-#include "Dictionary.h"
 
 #include "DynamicLibrary.h"
 #include "FluidSynthSettings.h"
 
 /*--------------------*/
 
-using BaseTypes::Containers::Dictionary;
 using Libraries::DynamicLibrary;
 using Libraries::FluidSynth::FluidSynthSettings;
 
@@ -32,37 +30,71 @@ using STR = BaseModules::StringUtil;
 /*-----------------------------------------*/
 
 /** settings creation function type in library */
-typedef Object (*FSSettings_CreationProc)(void);
+typedef Object (*_FSSettings_CreationProc)(void);
  
 /** settings destruction function type in library */
-typedef void (*FSSettings_DestructionProc)(Object);
+typedef void (*_FSSettings_DestructionProc)(Object);
  
 /** setting function type for int value in library */
-typedef int (*FSSettings_SetIntProc)(Object, const char*, int);
+typedef int (*_FSSettings_SetIntProc)(Object, const char*, int);
  
 /** setting function type for float value in library */
-typedef int (*FSSettings_SetNumProc)(Object, const char*, double);
+typedef int (*_FSSettings_SetNumProc)(Object, const char*, double);
  
 /** setting function type for string value in library */
-typedef int (*FSSettings_SetStrProc)(Object, const char*, const char*);
+typedef int (*_FSSettings_SetStrProc)(Object, const char*, const char*);
 
-/** settings creation function in library */
-static FSSettings_CreationProc FSSettings_make = NULL;
+/*--------------------*/
 
-/** settings destruction function in library */
-static FSSettings_DestructionProc FSSettings_destroy = NULL;
+namespace Libraries::FluidSynth {
 
-/** setting function for int value in library */
-static FSSettings_SetIntProc FSSettings_setInt = NULL;
+    /** the associated descriptor object type */
+    struct _FSSettingsDescriptor {
 
-/** setting function for float value in library */
-static FSSettings_SetNumProc FSSettings_setNum = NULL;
+        /** the underlying fluidsynth settings object */
+        Object settings;
 
-/** setting function for string value in library */
-static FSSettings_SetStrProc FSSettings_setStr = NULL;
+        /** settings creation function in library */
+        _FSSettings_CreationProc settingsMake;
 
-/** flag to tell whether function pointers have been initialized */
-static Boolean _functionsAreInitialized = false;
+        /** settings destruction function in library */
+        _FSSettings_DestructionProc settingsDestroy;
+
+        /** setting function for int value in library */
+        _FSSettings_SetIntProc settingsSetInt;
+
+        /** setting function for float value in library */
+        _FSSettings_SetNumProc settingsSetNum;
+
+        /** setting function for string value in library */
+        _FSSettings_SetStrProc settingsSetStr;
+
+        /*--------------------*/
+        /* con-/destruction   */
+        /*--------------------*/
+
+        /**
+         * Connects functions dynamically to functions from 
+         * <C>library</C>
+         *
+         * @param[in] library  underlying fluidsynth library
+         */
+        _FSSettingsDescriptor (IN DynamicLibrary* library);
+
+        /*--------------------*/
+
+        /**
+         * Finalizes descriptor
+         */
+        ~_FSSettingsDescriptor ();
+
+    };
+
+}
+
+/*====================*/
+
+using Libraries::FluidSynth::_FSSettingsDescriptor;
 
 /*--------*/
 /* MACROS */
@@ -74,17 +106,86 @@ static Boolean _functionsAreInitialized = false;
 
 /** simple macro for dynamic binding of a function */
 #define GPA(signature, name) \
-    (signature)((DynamicLibrary*) fsLibrary)->getFunctionByName(name)
+    reinterpret_cast<signature>(library->getFunctionByName(name))
+
+/*=======================*/
+/* _FSSettingsDescriptor */
+/*=======================*/
+
+_FSSettingsDescriptor::
+_FSSettingsDescriptor (IN DynamicLibrary* library)
+{
+    Logging_trace(">>");
+
+    if (library == nullptr) {
+        Logging_traceError("fluidsynth library not loaded");
+    } else {
+        settingsMake =
+            GPA(_FSSettings_CreationProc, "new_fluid_settings");
+        settingsDestroy =
+            GPA(_FSSettings_DestructionProc, "delete_fluid_settings");
+        settingsSetInt =
+            GPA(_FSSettings_SetIntProc, "fluid_settings_setint");
+        settingsSetNum =
+            GPA(_FSSettings_SetNumProc, "fluid_settings_setnum");
+        settingsSetStr =
+            GPA(_FSSettings_SetStrProc, "fluid_settings_setstr");
+
+        if (settingsMake == nullptr) {
+            reportBadFunction("make");
+        } else {
+            settings = settingsMake();
+        }
+    }
+    
+    Logging_trace("<<");
+}
+
+/*--------------------*/
+
+_FSSettingsDescriptor::~_FSSettingsDescriptor ()
+{
+    Logging_trace(">>");
+
+    if (settings != nullptr) {
+        if (settingsDestroy == nullptr) {
+            reportBadFunction("destroy");
+        } else {
+            settingsDestroy(settings);
+            settings = nullptr;
+        }
+    }
+
+    Logging_trace("<<");
+}
 
 /*====================*/
 /* PRIVATE FEATURES    */
 /*====================*/
 
 /**
+ * the list of settings that require a restart of the synthesizer
+ */
+static const StringList _restartingKeysList =
+    StringList::fromList({"synth.interpolation-method",
+                          "synth.limiter.active",
+                          "synth.limiter.attack",
+                          "synth.limiter.hold",
+                          "synth.limiter.link-channels",
+                          "synth.limiter.output-limit",
+                          "synth.limiter.release",
+                          "synth.limiter.smoothing-stages",
+                          "synth.reverb.engine",
+                          "synth.sample-rate",              
+                          "synth.verbose"});
+
+/*--------------------*/
+
+/**
  * a mapping from a setting name from FluidSynth to the associated
  * type (encoded as a single letter)
 */
-static Dictionary _settingsKeyToKindMap =
+static const Dictionary _settingsKeyToKindMap =
     Dictionary::makeFromString(
         "synth.chorus.active               -> B,"
         "synth.chorus.depth                -> F,"
@@ -95,6 +196,13 @@ static Dictionary _settingsKeyToKindMap =
         "synth.dynamic-sample-loading      -> B,"
         "synth.gain                        -> F,"
         "synth.interpolation-method        -> I,"
+        "synth.limiter.active              -> B,"
+        "synth.limiter.attack              -> F,"
+        "synth.limiter.hold                -> F,"
+        "synth.limiter.link-channels       -> F,"
+        "synth.limiter.output-limit        -> F,"
+        "synth.limiter.release             -> F,"
+        "synth.limiter.smoothing-stages    -> I,"
         "synth.midi-bank-select            -> S,"
         "synth.min-note-length             -> I,"
         "synth.overflow.age                -> F,"
@@ -105,70 +213,85 @@ static Dictionary _settingsKeyToKindMap =
         "synth.overflow.sustained          -> F,"
         "synth.overflow.volume             -> F,"
         "synth.polyphony                   -> I,"
+        "synth.portamento-time             -> S,"
         "synth.reverb.active               -> B,"
         "synth.reverb.damp                 -> F,"
+        "synth.reverb.engine               -> S,"
         "synth.reverb.level                -> F,"
         "synth.reverb.room-size            -> F,"
         "synth.reverb.width                -> F,"
         "synth.sample-rate                 -> F,"
         "synth.threadsafe-api              -> B,"
         "synth.verbose                     -> B"
-        );
+    );
 
 /*--------------------*/
 
 /**
- * Connects static functions dynamically to functions from DLL
- * <C>fsLibrary</C>
- *
- * @param[in] fsLibrary  underlying fluidsynth library
- */
-static void _initializeFunctionsForLibrary (IN Object fsLibrary)
-{
-    Logging_trace(">>");
-
-    if (fsLibrary == NULL) {
-        Logging_traceError("fluidsynth library not loaded");
-    } else if (!_functionsAreInitialized) {
-        FSSettings_make =
-            GPA(FSSettings_CreationProc, "new_fluid_settings");
-        FSSettings_destroy =
-            GPA(FSSettings_DestructionProc, "delete_fluid_settings");
-        FSSettings_setInt =
-            GPA(FSSettings_SetIntProc, "fluid_settings_setint");
-        FSSettings_setNum =
-            GPA(FSSettings_SetNumProc, "fluid_settings_setnum");
-        FSSettings_setStr =
-            GPA(FSSettings_SetStrProc, "fluid_settings_setstr");
-
-        _functionsAreInitialized = true;
-    }
-    
-    Logging_trace("<<");
-}
+ * a mapping from a setting name from FluidSynth to the associated
+ * default value as string
+*/
+static const Dictionary _settingsKeyToDefaultValueMap =
+    Dictionary::makeFromString(
+        "synth.chorus.active               -> true,"
+        "synth.chorus.depth                -> 4.25,"
+        "synth.chorus.level                -> 0.6,"
+        "synth.chorus.nr                   -> 3,"
+        "synth.chorus.speed                -> 0.2,"
+        "synth.dynamic-sample-loading      -> false,"
+        "synth.gain                        -> 0.2,"
+        "synth.interpolation-method        -> 4;7,"
+        "synth.limiter.active              -> false,"
+        "synth.limiter.attack              -> 5,"
+        "synth.limiter.hold                -> 15,"
+        "synth.limiter.link-channels       -> 0.5,"
+        "synth.limiter.output-limit        -> 0.99999,"
+        "synth.limiter.release             -> 40,"
+        "synth.limiter.smoothing-stages    -> 1,"
+        "synth.midi-bank-select            -> gs,"
+        "synth.min-note-length             -> 10,"
+        "synth.overflow.age                -> 1000,"
+        "synth.overflow.important          -> 5000,"
+        "synth.overflow.percussion         -> 4000,"
+        "synth.overflow.released           -> -2000,"
+        "synth.overflow.sustained          -> -1000,"
+        "synth.overflow.volume             -> 500,"
+        "synth.polyphony                   -> 256,"
+        "synth.portamento-time             -> auto,"
+        "synth.reverb.active               -> true,"
+        "synth.reverb.damp                 -> 0.2,"
+        "synth.reverb.engine               -> dat,"
+        "synth.reverb.level                -> 0.7,"
+        "synth.reverb.room-size            -> 0.5,"
+        "synth.reverb.width                -> 0.8,"
+        /* sample rate is always set by the plugin */
+        /* "synth.sample-rate              -> 44100," */
+        "synth.threadsafe-api              -> true,"
+        "synth.verbose                     -> false"
+    );
 
 /*====================*/
 /* PUBLIC FEATURES    */
 /*====================*/
 
-FluidSynthSettings::FluidSynthSettings (IN FluidSynth* library)
-    : _descriptor{NULL}
+/*--------------------*/
+/* con-/destruction   */
+/*--------------------*/
+
+FluidSynthSettings::FluidSynthSettings (IN FluidSynth* fsLibrary)
+    : _descriptor{nullptr}
 {
     Logging_trace(">>");
 
     Logging_trace1("--: settingsToKindMap = %1",
                    _settingsKeyToKindMap.toString());
 
-    if (!library->isLoaded()) {
+    if (fsLibrary == nullptr || !fsLibrary->isLoaded()) {
         Logging_traceError("library is undefined");
     } else {
-        _initializeFunctionsForLibrary(library->underlyingObject());
-
-        if (FSSettings_make == NULL) {
-            reportBadFunction("make");
-        } else {
-            _descriptor = FSSettings_make();
-        }
+        const DynamicLibrary* dynamicLibrary =
+            reinterpret_cast<DynamicLibrary*>(fsLibrary->underlyingObject());
+        _descriptor = new _FSSettingsDescriptor(dynamicLibrary);
     }
 
     Logging_trace("<<");
@@ -179,20 +302,37 @@ FluidSynthSettings::FluidSynthSettings (IN FluidSynth* library)
 FluidSynthSettings::~FluidSynthSettings ()
 {
     Logging_trace(">>");
-
-    if (_descriptor != NULL) {
-        if (FSSettings_destroy == NULL) {
-            reportBadFunction("destroy");
-        } else {
-            FSSettings_destroy(_descriptor);
-        }
-
-        _descriptor = NULL;
-    }
-
+    delete reinterpret_cast<_FSSettingsDescriptor*>(_descriptor);
     Logging_trace("<<");
 }
 
+/*--------------------*/
+/* property access    */
+/*--------------------*/
+
+const Dictionary& FluidSynthSettings::keyToDefaultValueMap ()
+{
+    return _settingsKeyToDefaultValueMap;
+}
+
+/*--------------------*/
+
+const StringList& FluidSynthSettings::restartingKeysList ()
+{
+    return _restartingKeysList;
+}
+
+/*--------------------*/
+
+Object FluidSynthSettings::underlyingObject () const
+{
+    _FSSettingsDescriptor& descriptor =
+        TOREFERENCE<_FSSettingsDescriptor>(_descriptor);
+    return descriptor.settings;
+}
+
+/*--------------------*/
+/* change             */
 /*--------------------*/
 
 Boolean FluidSynthSettings::set (IN String& key, IN String& value)
@@ -200,76 +340,79 @@ Boolean FluidSynthSettings::set (IN String& key, IN String& value)
     Logging_trace2(">>: key = %1, value = %2", key, value);
 
     Boolean isOkay = false;
-    Integer operationResult;
 
     if (!_settingsKeyToKindMap.contains(key)) {
         Logging_traceError("key not found --> skipped");
     } else {
+        const _FSSettingsDescriptor& descriptor =
+            TOREFERENCE<_FSSettingsDescriptor>(_descriptor);
         const String kind = _settingsKeyToKindMap.at(key);
         const char* keyAsCharArray = key.c_str();
-        Object settingsObject = _descriptor;
+        Object settingsObject = descriptor.settings;
 
-        if (settingsObject == NULL) {
+        if (settingsObject == nullptr) {
             Logging_traceError("settings object must be defined");
         } else {
+            Integer operationResult;
+
             if (key == "synth.interpolation-method") {
-                /* special handling of interpolation method (which is
-                   not an official parameter */
+                /* special handling of interpolation method (which
+                   is not an official parameter */
                 Integer intValue = STR::toInteger(value);
                 Logging_trace2("--: kind = %1, value = %2",
                                kind, TOSTRING(intValue));
                 isOkay = (intValue == 0 || intValue == 1
-                          || intValue == 4 || intValue == 7);
-            } else if (kind == "B") {
-                Integer boolValue = (value == "true" || value == "1"
-                                     ? 1 : 0);
-                Logging_trace2("--: kind = %1, value = %2",
-                               kind, TOSTRING(boolValue));
+                          || intValue >= 4 && intValue <= 7);
+            } else if (kind == "B" || kind == "I") {
+                _FSSettings_SetIntProc settingsSetInt =
+                    descriptor.settingsSetInt;
+                Integer intValue;
 
-                if (FSSettings_setInt == NULL) {
-                    reportBadFunction("setInt");
+                if (kind == "B") {
+                    intValue = (value == "true" || value == "1"
+                                ? 1 : 0);
                 } else {
-                    operationResult = FSSettings_setInt(settingsObject,
-                                                        keyAsCharArray,
-                                                        (int) boolValue);
-                    isOkay = (operationResult == 0);
+                    intValue = STR::toInteger(value);
                 }
-            } else if (kind == "I") {
-                Integer intValue = STR::toInteger(value);
+
                 Logging_trace2("--: kind = %1, value = %2",
                                kind, TOSTRING(intValue));
 
-                if (FSSettings_setInt == NULL) {
+                if (settingsSetInt == nullptr) {
                     reportBadFunction("setInt");
                 } else {
-                    operationResult = FSSettings_setInt(settingsObject,
-                                                        keyAsCharArray,
-                                                        (int) intValue);
+                    operationResult = settingsSetInt(settingsObject,
+                                                     keyAsCharArray,
+                                                     int(intValue));
                     isOkay = (operationResult == 0);
                 }
             } if (kind == "F") {
+                _FSSettings_SetNumProc settingsSetNum =
+                    descriptor.settingsSetNum;
                 Real numValue = STR::toReal(value);
                 Logging_trace2("--: kind = %1, value = %2",
                                kind, TOSTRING(numValue));
 
-                if (FSSettings_setNum == NULL) {
+                if (settingsSetNum == nullptr) {
                     reportBadFunction("setNum");
                 } else {
-                    operationResult = FSSettings_setNum(settingsObject,
-                                                        keyAsCharArray,
-                                                        (float) numValue);
+                    operationResult = settingsSetNum(settingsObject,
+                                                     keyAsCharArray,
+                                                     float(numValue));
                     isOkay = (operationResult == 0);
                 }
             } if (kind == "S") {
+                _FSSettings_SetStrProc settingsSetStr =
+                    descriptor.settingsSetStr;
                 Logging_trace2("--: kind = %1, value = %2",
                                kind, value);
 
-                if (FSSettings_setStr == NULL) {
+                if (settingsSetStr == nullptr) {
                     reportBadFunction("setStr");
                 } else {
-                    operationResult = FSSettings_setStr(settingsObject,
-                                                        keyAsCharArray,
-                                                        value.c_str());
+                    operationResult = settingsSetStr(settingsObject,
+                                                     keyAsCharArray,
+                                                     value.c_str());
                     isOkay = (operationResult == 0);
                 }
             }
@@ -278,11 +421,4 @@ Boolean FluidSynthSettings::set (IN String& key, IN String& value)
     
     Logging_trace1("<<: %1", TOSTRING(isOkay));
     return isOkay;
-}
-
-/*--------------------*/
-
-Object FluidSynthSettings::underlyingObject () const
-{
-    return _descriptor;
 }

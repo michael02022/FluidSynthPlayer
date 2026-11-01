@@ -43,7 +43,7 @@ static Byte _eventByteToKindCode (IN Byte b)
     } else if (b == '\xFF') {
         result = 8;
     } else {
-        result = ((char) b & '\x70') >> 4;
+        result = (char(b) & '\x70') >> 4;
     }
 
     return result;
@@ -461,13 +461,13 @@ String MidiEvent::toString () const
     _MidiEventDescriptor& self =
         TOREFERENCE<_MidiEventDescriptor>(_descriptor);
     ByteList& dataList = self.midiDataList;
-    Natural dataIndex = 0;
     Natural dataListLength = dataList.length();
     String dataListRepresentation;
 
     if (dataListLength == 0) {
         dataListRepresentation = "{}";
     } else {
+        Natural dataIndex = 0;
         Byte eventByte = dataList.at(dataIndex++);
         Byte eventKind = _eventByteToKindCode(eventByte);
         Boolean hasTextString = false;
@@ -604,7 +604,7 @@ MidiMetaEventKind MidiEvent::metaKind () const
 Natural MidiEvent::channel () const
 {
     Logging_trace(">>");
-    Natural result = (Natural) (_getDataByteNOLOG(0) & 0xF);
+    Natural result = Natural(_getDataByteNOLOG(0) & 0xF);
     Logging_trace1("<<: %1", TOSTRING(result));
     return result;
 }
