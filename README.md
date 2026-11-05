@@ -111,6 +111,15 @@ cmake --build build-clap -j$(nproc)
 cp build-clap/FluidSynthPlayer.clap ~/.clap/
 ```
 
+Distribution zip (`dist/FluidSynthPlayer-<version>-linux-<arch>.zip`, with a
+README.txt and the licenses of every statically linked component; the
+plugin uses the system's libsndfile, and runs on the glibc version it was
+built against or newer):
+
+```sh
+sh scripts/package-linux.sh build-clap
+```
+
 ### Windows
 
 Needs CMake >= 3.24 and either Visual Studio 2022 (MSVC) or MinGW-w64
