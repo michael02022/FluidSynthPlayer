@@ -34,6 +34,88 @@ Those components are currently available - as x86_64 versions - for Windows and 
 
 All the code is open-source; hence you can check and adapt it to your needs.
 
+## CLAP Plugin with ImGui Interface (Linux)
+
+Besides the original JUCE-based VST3/AU plugin, this fork contains a
+**JUCE-free CLAP plugin**, `FluidSynthPlayer.clap`, with a Dear ImGui
+interface over raw X11/OpenGL2 (the same GUI stack as the sibling projects
+SfzDrummer and SoloSampler), in a single compact panel (560x584, scales
+when resized):
+
+- **SoundFont**: folder button (pop-up file chooser) or drag & drop a
+  `.sf2` / `.sf3` / `.dls` file onto the window; the pencil button opens it
+  in an external editor (configurable, e.g. Polyphone), right-click the
+  name to reload/unload. Loading happens on a background thread and the new
+  synthesizer is swapped in without blocking audio.
+- **Patch name** `[bank:patch]: name` with prev/next arrows (and mouse
+  wheel); clicking it opens the patch selector, a searchable list grouped
+  by bank. `(none)` when the SoundFont lacks the patch, `(DrumKit)` for
+  bank 128.
+- **REVERB / CHORUS**: *BUILT-IN* switch, *preset override* switch and send
+  *LEVEL* knob; *SETUP* holds the effect unit parameters (reverb engine,
+  room, damping, width / chorus voices, speed, depth).
+- **ENVELOPE** (A/D/S/R faders scaling the preset's own envelope, with an
+  override switch), **LFO** (DEL/AMT/SPD vibrato), **MISC** (filter
+  CUT/RES).
+- **Options** (gear): volume, MIDI mode *Omni* / *Multitimbral (GM)* with a
+  16-channel table, program change reception, bend range, transpose, fine
+  tune, Poly/Mono/Legato, portamento, polyphony, interpolation, the raw
+  FluidSynth settings of the original plugin, SoundFont info and the
+  FluidSynth log.
+- Every control is a CLAP parameter (automation, gestures, text entry);
+  MIDI events are placed sample-accurately as in the original plugin.
+- **Restore MIDI controllers** (Options): some SoundFonts - e.g. converted
+  E-mu EMAX II libraries - redefine the standard SF2 modulators with zero
+  amounts, which per the spec disables CC7 volume, CC10 pan, CC11
+  expression, CC91/93 sends, pitch bend, modulation or aftertouch. The
+  plugin detects this on load (notice + list in Options/Info) and, with
+  this option on, reinstates exactly those controllers on every voice.
+  MIDI controller values also survive SoundFont reloads.
+- The selected patch is saved with the DAW project and only an explicit
+  MIDI Program Change moves it (GM/GS/XG reset SysEx no longer fall back
+  to program 0). Options > Info lists every Program Change / Bank Select /
+  reset message received, to track down a controller that sends them.
+- **Default SoundFont** (Options > General, or right-click the SoundFont
+  name > *Set as default*): loaded by every newly added instance; projects
+  always reopen with their own saved SoundFont. Stored with the other
+  global preferences in `~/.config/FluidSynthPlayer/config.txt`.
+
+- **FluidSynth 2.6** (as in upstream FluidSynthPlugin 0.8.0): output
+  limiter, reverb engines (Dattorro, FDN, Freeverb, Lexicon, Signalsmith -
+  projects saved before keep 2.5's FDN), 11/17/25-point sinc
+  interpolation and the portamento-time CC mode. **Render interpolation**
+  (Options > General): the method used when the DAW renders/exports
+  offline (CLAP `clap.render`) - 25-point sinc by default, as in
+  upstream's "4;7" - while playback keeps the lighter one. Options > Info lists the
+  version of every part (this plugin, the FluidSynthPlugin release it is
+  based on, FluidSynth, libsndfile, CLAP, Dear ImGui); the CLAP
+  description shown by the DAW includes them too.
+
+FluidSynth 2.6.2 is vendored in `external/fluidsynth` (with the header-only
+Signalsmith libraries in `external/signalsmith`) and linked statically, so
+the `.clap` doesn't depend on the system's libfluidsynth version.
+
+Build (needs CMake >= 3.24, `libsndfile1-dev`, X11/OpenGL headers, `xxd`;
+`zenity` at runtime for the *Open...* dialog):
+
+```sh
+cmake -B build-clap
+cmake --build build-clap -j$(nproc)
+cp build-clap/FluidSynthPlayer.clap ~/.clap/
+```
+
+Test without a DAW (renders audio, checks params/state; `gui` opens the
+window, `FLUIDSYNTHPLAYER_DEBUG_POPUP=patches|options|reverb` opens a popup
+for screenshots; `test/clap/xdnd_drop.py` simulates a drag & drop onto it):
+
+```sh
+./build-clap/mini_host build-clap/FluidSynthPlayer.clap /usr/share/sounds/sf2/FluidR3_GM.sf2 [gui]
+```
+
+The sources live in `src/clap/`; the vendored FluidSynth (LGPL-2.1),
+Signalsmith, CLAP headers, Dear ImGui, Font Awesome and Roboto (UI font,
+Apache 2.0) in `external/`.
+
 ## Installation
 
 The installation is as follows:

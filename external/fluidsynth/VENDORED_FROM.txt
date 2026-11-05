@@ -1,0 +1,8 @@
+FluidSynth v2.6.2 (https://github.com/FluidSynth/fluidsynth, tag v2.6.2,
+commit c3b244ddfd094489a5490beee013c621a504adf2), with its git submodules gcem and signalsmith-audio-basics
+checked out at the commits that tag pins. The test/manual submodule (103 MB
+of test data) is left out - it is only used by FluidSynth's own manual tests.
+
+License: LGPL-2.1 (see LICENSE). FluidSynthPlayer.clap links it statically;
+the complete corresponding source is this directory, so the plugin can be
+rebuilt/relinked against a modified FluidSynth (LGPL section 6).

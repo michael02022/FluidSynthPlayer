@@ -1,0 +1,9 @@
+Header-only dependencies of FluidSynth 2.6's Signalsmith reverb engine and
+limiter (external/fluidsynth/signalsmith-audio-basics), vendored so the build
+needs no network access (upstream fetches them with CMake FetchContent):
+
+  linear/       https://github.com/Signalsmith-Audio/linear       tag 0.3.1   (MIT)
+  dsp/          https://github.com/Signalsmith-Audio/dsp          tag v1.7.1  (MIT)
+  hilbert-iir/  https://github.com/Signalsmith-Audio/hilbert-iir  tag 1.0.0   (0BSD)
+
+Their tests/ directories are left out.

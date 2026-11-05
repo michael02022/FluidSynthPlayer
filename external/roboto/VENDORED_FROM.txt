@@ -1,0 +1,5 @@
+Roboto-Bold.ttf and Roboto-Medium.ttf copied from the Debian/Ubuntu package
+fonts-roboto-unhinted (/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/).
+Roboto is (c) Google, licensed under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0). Embedded into the plugin
+binary with xxd -i at build time (see CMakeLists.txt).
