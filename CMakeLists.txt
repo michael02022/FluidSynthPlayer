@@ -71,9 +71,22 @@ option(FSP_WITH_SNDFILE "SF3 support through libsndfile (if found)" ON)
 set(FSP_HAVE_SNDFILE OFF)
 if(FSP_WITH_SNDFILE)
   list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/external/fluidsynth/cmake_admin)
+  # FluidSynth's pkg-config based Find modules (SndFileLegacy -> Ogg,
+  # Vorbis, FLAC, ...) call helpers defined here.
+  include(PkgConfigHelpers)
   find_package(SndFile QUIET)
   if(NOT TARGET SndFile::sndfile)
     find_package(SndFileLegacy QUIET)
+    if(TARGET SndFile::sndfile)
+      # FluidSynth repeats this lookup, and the legacy module only reports
+      # success when it creates the target itself - hand FluidSynth the one
+      # found here through a find_package() redirect (cleared every run).
+      include(CMakePackageConfigHelpers)
+      file(WRITE ${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}/sndfile-config.cmake "")
+      write_basic_package_version_file(
+        ${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}/sndfile-config-version.cmake
+        VERSION ${SndFile_VERSION} COMPATIBILITY AnyNewerVersion)
+    endif()
   endif()
   if(TARGET SndFile::sndfile)
     set(FSP_HAVE_SNDFILE ON)
