@@ -108,6 +108,14 @@ else()
   message(WARNING "libsndfile not found (or FSP_WITH_SNDFILE=OFF): building WITHOUT SF3 "
                   "support - SF2 and DLS SoundFonts still work.")
 endif()
+# Read by scripts/package-windows.ps1 to describe the packaged build; with
+# vcpkg it also points at the license files of libsndfile and its codecs
+# (<dir>/<port>/copyright), linked into the plugin.
+set(_fsp_build_info "sf3=${FSP_HAVE_SNDFILE}\n")
+if(FSP_HAVE_SNDFILE AND DEFINED _VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+  string(APPEND _fsp_build_info "vcpkg_share=${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share\n")
+endif()
+file(WRITE ${CMAKE_BINARY_DIR}/fsp_build_info.txt "${_fsp_build_info}")
 
 # ---------------------------------------------------------------- FluidSynth
 #

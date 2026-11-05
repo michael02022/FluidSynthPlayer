@@ -128,13 +128,30 @@ cmake -B build-win -A x64 -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsyste
 cmake --build build-win --config Release
 ```
 
-MinGW-w64 (e.g. MSYS2, scoop or winlibs GCC) with Ninja; add
-`-DCMAKE_TOOLCHAIN_FILE=...vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-mingw-static`
-for SF3 support, or leave it out to build without libsndfile:
+MinGW-w64 (e.g. MSYS2, scoop or winlibs GCC) with Ninja. For SF3 support,
+first build a static libsndfile with vcpkg (Ogg/Vorbis/FLAC/Opus codecs,
+no MP3 - SF3 only needs Vorbis), in PowerShell:
+
+```powershell
+$env:VCPKG_DEFAULT_HOST_TRIPLET = "x64-mingw-static"
+vcpkg install "libsndfile[core,external-libs]:x64-mingw-static"
+cmake -G Ninja -B build-win-sf3 -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-mingw-static
+cmake --build build-win-sf3
+```
+
+Without vcpkg (no SF3 support):
 
 ```bat
 cmake -G Ninja -B build-win -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
 cmake --build build-win
+```
+
+Distribution zip (`dist/FluidSynthPlayer-<version>-windows-x64.zip`, with a
+README.txt and the licenses of every statically linked component, including
+libsndfile and its codecs when built with vcpkg):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -BuildDir build-win-sf3
 ```
 
 Install by copying `FluidSynthPlayer.clap` into
