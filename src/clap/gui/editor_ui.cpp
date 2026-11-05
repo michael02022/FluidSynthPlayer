@@ -1,7 +1,5 @@
 #include "editor_ui.hpp"
 
-#include <strings.h>
-
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -17,6 +15,7 @@
 #include "engine/FluidEngine.h"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "platform.hpp"
 
 namespace {
 
@@ -136,7 +135,7 @@ bool containsNoCase(const std::string& haystack, const char* needle) {
     if (!needle[0]) return true;
     const size_t n = strlen(needle);
     for (size_t i = 0; i + n <= haystack.size(); ++i)
-        if (!strncasecmp(haystack.c_str() + i, needle, n)) return true;
+        if (!platform::strNCaseCmp(haystack.c_str() + i, needle, n)) return true;
     return false;
 }
 

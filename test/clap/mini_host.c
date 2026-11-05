@@ -1,5 +1,5 @@
 #define _GNU_SOURCE
-/* Minimal CLAP test host for FluidSynthPlayer: dlopen's the .clap, restores
+/* Minimal CLAP test host for FluidSynthPlayer: loads the .clap, restores
  * a state pointing at a SoundFont (no drag & drop/clicks needed), renders
  * audio and checks:
  *   - sample-accurate note placement (silence before the note's timestamp)
@@ -10,15 +10,97 @@
  *   - state save/load round trip
  * Optionally opens the GUI window for a few seconds (visual check).
  * Usage: mini_host <plugin.clap> <soundfont.sf2> [gui] [seconds]
- * Adapted from SfzDrummer's mini_host.c (sibling project). */
+ * Adapted from SfzDrummer's mini_host.c (sibling project). Builds on Linux
+ * and Windows (see the "platform" section right below). */
 #include <clap/clap.h>
-#include <dlfcn.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* -------------------------------------------------------------- platform */
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <direct.h>
+
+#define GUI_API CLAP_WINDOW_API_WIN32
+typedef HMODULE lib_t;
+static lib_t lib_open(const char* path) { return LoadLibraryA(path); }
+static void* lib_sym(lib_t l, const char* name) { return (void*)GetProcAddress(l, name); }
+static void lib_close(lib_t l) { FreeLibrary(l); }
+static const char* lib_error(void) {
+    static char buf[64];
+    snprintf(buf, sizeof(buf), "LoadLibrary failed (error %lu)", GetLastError());
+    return buf;
+}
+/* Sleeps while keeping the (single-threaded) UI alive: on Windows the
+ * plugin's editor lives on this thread and is driven by its messages. */
+static void wait_ms_pumping(unsigned ms) {
+    MSG msg;
+    while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageA(&msg);
+    }
+    Sleep(ms);
+}
+static int make_dir(const char* path) { return _mkdir(path); }
+static int remove_dir(const char* path) { return _rmdir(path); }
+/* Live OS environment (the plugin may carry its own copy of the C runtime,
+ * whose getenv wouldn't see a putenv made here). */
+static void set_env(const char* name, const char* value) { SetEnvironmentVariableA(name, value); }
+static char* make_temp_dir(char* buf, size_t size) {
+    char tmp[MAX_PATH];
+    if (!GetTempPathA(sizeof(tmp), tmp)) return NULL;
+    snprintf(buf, size, "%sfsp_cfg_%lu", tmp, GetCurrentProcessId());
+    return make_dir(buf) == 0 ? buf : NULL;
+}
+/* A real host embeds the editor in a window of its own: do the same. */
+static HWND create_parent_window(uint32_t w, uint32_t h) {
+    WNDCLASSA wc = {0};
+    wc.lpfnWndProc = DefWindowProcA;
+    wc.hInstance = GetModuleHandleA(NULL);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.lpszClassName = "mini_host_parent";
+    RegisterClassA(&wc);
+    RECT r = {0, 0, (LONG)w, (LONG)h};
+    const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
+    AdjustWindowRect(&r, style, FALSE);
+    HWND hwnd = CreateWindowA("mini_host_parent", "mini_host - FluidSynthPlayer", style,
+                              CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
+                              NULL, NULL, wc.hInstance, NULL);
+    ShowWindow(hwnd, SW_SHOW);
+    return hwnd;
+}
+#else
+#include <dlfcn.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#define GUI_API CLAP_WINDOW_API_X11
+typedef void* lib_t;
+static lib_t lib_open(const char* path) { return dlopen(path, RTLD_NOW | RTLD_LOCAL); }
+static void* lib_sym(lib_t l, const char* name) { return dlsym(l, name); }
+static void lib_close(lib_t l) { dlclose(l); }
+static const char* lib_error(void) { return dlerror(); }
+static void wait_ms_pumping(unsigned ms) { usleep(ms * 1000u); }
+static int make_dir(const char* path) { return mkdir(path, 0755); }
+static int remove_dir(const char* path) { return rmdir(path); }
+static void set_env(const char* name, const char* value) { setenv(name, value, 1); }
+static char* make_temp_dir(char* buf, size_t size) {
+    snprintf(buf, size, "/tmp/fsp_cfg_XXXXXX");
+    return mkdtemp(buf);
+}
+#endif
+
+/* memmem() isn't available everywhere (MinGW, MSVC). */
+static int contains_bytes(const void* hay, size_t hayLen, const void* needle, size_t needleLen) {
+    if (needleLen == 0) return 1;
+    for (size_t i = 0; i + needleLen <= hayLen; ++i)
+        if (!memcmp((const char*)hay + i, needle, needleLen)) return 1;
+    return 0;
+}
 
 #define BLOCK 512
 #define SR 48000.0
@@ -260,12 +342,12 @@ int main(int argc, char** argv) {
     int wantGui = argc > 3 && !strcmp(argv[3], "gui");
     int guiSeconds = argc > 4 ? atoi(argv[4]) : 4;
 
-    void* dl = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+    lib_t dl = lib_open(argv[1]);
     if (!dl) {
-        fprintf(stderr, "dlopen: %s\n", dlerror());
+        fprintf(stderr, "loading %s: %s\n", argv[1], lib_error());
         return 1;
     }
-    const clap_plugin_entry_t* entry = (const clap_plugin_entry_t*)dlsym(dl, "clap_entry");
+    const clap_plugin_entry_t* entry = (const clap_plugin_entry_t*)lib_sym(dl, "clap_entry");
     if (!entry || !entry->init(argv[1])) return 1;
     const clap_plugin_factory_t* factory =
         (const clap_plugin_factory_t*)entry->get_factory(CLAP_PLUGIN_FACTORY_ID);
@@ -663,7 +745,7 @@ int main(int argc, char** argv) {
         memset(&out, 0, sizeof(out));
         clap_ostream_t os = {.ctx = &out, .write = mem_write};
         CHECK(state->save(plug, &os), "state save (%llu bytes)", (unsigned long long)out.len);
-        int pathFound = memmem(out.buf, out.len, sfPath, strlen(sfPath)) != NULL;
+        int pathFound = contains_bytes(out.buf, out.len, sfPath, strlen(sfPath));
         CHECK(pathFound, "saved state references the SoundFont path");
         clap_istream_t is2 = {.ctx = &out, .read = mem_read};
         CHECK(state->load(plug, &is2), "state load (while active)");
@@ -680,10 +762,18 @@ int main(int argc, char** argv) {
     if (wantGui) {
         const clap_plugin_gui_t* gui =
             (const clap_plugin_gui_t*)plug->get_extension(plug, CLAP_EXT_GUI);
-        if (gui && gui->is_api_supported(plug, CLAP_WINDOW_API_X11, false) &&
-            gui->create(plug, CLAP_WINDOW_API_X11, false)) {
+        if (gui && gui->is_api_supported(plug, GUI_API, false) &&
+            gui->create(plug, GUI_API, false)) {
             uint32_t w = 0, h = 0;
             gui->get_size(plug, &w, &h);
+#ifdef _WIN32
+            HWND parent = create_parent_window(w, h);
+            clap_window_t win = {.api = GUI_API, .win32 = parent};
+            if (!gui->set_parent(plug, &win)) {
+                printf("  FAIL set_parent\n");
+                ++g_failures;
+            }
+#endif
             gui->show(plug);
             printf("gui shown (%ux%u) for %d s\n", w, h, guiSeconds);
             /* keep "playing" so meters/piano/voices are alive on screen */
@@ -694,9 +784,12 @@ int main(int argc, char** argv) {
             run_block(plug, &in, NULL);
             for (int i = 0; i < guiSeconds * 94; ++i) {
                 run_block(plug, NULL, NULL);
-                usleep(10600);
+                wait_ms_pumping(10);
             }
             gui->destroy(plug);
+#ifdef _WIN32
+            DestroyWindow(parent);
+#endif
             printf("gui destroyed\n");
         } else {
             printf("gui not available\n");
@@ -711,16 +804,16 @@ int main(int argc, char** argv) {
     /* 6) default SoundFont (global config "defaultsf="): applied to a
      * brand-new instance, never to one restoring a saved project. */
     {
-        char cfgDir[] = "/tmp/fsp_cfg_XXXXXX";
-        if (!mkdtemp(cfgDir)) { perror("mkdtemp"); return 1; }
-        char path[512];
+        char cfgDir[512];
+        if (!make_temp_dir(cfgDir, sizeof(cfgDir))) { perror("temp dir"); return 1; }
+        char path[600];
         snprintf(path, sizeof(path), "%s/FluidSynthPlayer", cfgDir);
-        mkdir(path, 0755);
+        make_dir(path);
         snprintf(path, sizeof(path), "%s/FluidSynthPlayer/config.txt", cfgDir);
         FILE* f = fopen(path, "w");
         fprintf(f, "editor=polyphone\ndefaultsf=%s\n", sfPath);
         fclose(f);
-        setenv("XDG_CONFIG_HOME", cfgDir, 1);
+        set_env("XDG_CONFIG_HOME", cfgDir);
 
         for (int restore = 0; restore <= 1; ++restore) {
             const clap_plugin_t* p2 = factory->create_plugin(factory, &host, desc->id);
@@ -743,7 +836,7 @@ int main(int argc, char** argv) {
             memset(&out, 0, sizeof(out));
             clap_ostream_t os = {.ctx = &out, .write = mem_write};
             st2->save(p2, &os);
-            int hasPath = memmem(out.buf, out.len, sfPath, strlen(sfPath)) != NULL;
+            int hasPath = contains_bytes(out.buf, out.len, sfPath, strlen(sfPath));
             if (!restore) {
                 CHECK(rms > 0.001 && hasPath,
                       "new instance starts with the default SoundFont (RMS %.4f, in state: %d)",
@@ -756,14 +849,14 @@ int main(int argc, char** argv) {
             p2->deactivate(p2);
             p2->destroy(p2);
         }
-        unlink(path);
+        remove(path);
         snprintf(path, sizeof(path), "%s/FluidSynthPlayer", cfgDir);
-        rmdir(path);
-        rmdir(cfgDir);
+        remove_dir(path);
+        remove_dir(cfgDir);
     }
 
     entry->deinit();
-    dlclose(dl);
+    lib_close(dl);
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL OK\n", g_failures);
     return g_failures ? 1 : 0;
 }

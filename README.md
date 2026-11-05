@@ -34,13 +34,13 @@ Those components are currently available - as x86_64 versions - for Windows and 
 
 All the code is open-source; hence you can check and adapt it to your needs.
 
-## CLAP Plugin with ImGui Interface (Linux)
+## CLAP Plugin with ImGui Interface (Linux and Windows)
 
 Besides the original JUCE-based VST3/AU plugin, this fork contains a
 **JUCE-free CLAP plugin**, `FluidSynthPlayer.clap`, with a Dear ImGui
-interface over raw X11/OpenGL2 (the same GUI stack as the sibling projects
-SfzDrummer and SoloSampler), in a single compact panel (560x584, scales
-when resized):
+interface over OpenGL2 - raw X11/GLX on Linux (the same GUI stack as the
+sibling projects SfzDrummer and SoloSampler), Win32/WGL on Windows - in a
+single compact panel (560x584, scales when resized):
 
 - **SoundFont**: folder button (pop-up file chooser) or drag & drop a
   `.sf2` / `.sf3` / `.dls` file onto the window; the pencil button opens it
@@ -78,7 +78,8 @@ when resized):
 - **Default SoundFont** (Options > General, or right-click the SoundFont
   name > *Set as default*): loaded by every newly added instance; projects
   always reopen with their own saved SoundFont. Stored with the other
-  global preferences in `~/.config/FluidSynthPlayer/config.txt`.
+  global preferences in `~/.config/FluidSynthPlayer/config.txt`
+  (`%APPDATA%\FluidSynthPlayer\config.txt` on Windows).
 
 - **FluidSynth 2.6** (as in upstream FluidSynthPlugin 0.8.0): output
   limiter, reverb engines (Dattorro, FDN, Freeverb, Lexicon, Signalsmith -
@@ -95,14 +96,59 @@ FluidSynth 2.6.2 is vendored in `external/fluidsynth` (with the header-only
 Signalsmith libraries in `external/signalsmith`) and linked statically, so
 the `.clap` doesn't depend on the system's libfluidsynth version.
 
-Build (needs CMake >= 3.24, `libsndfile1-dev`, X11/OpenGL headers, `xxd`;
-`zenity` at runtime for the *Open...* dialog):
+libsndfile is only needed for SF3 (Ogg/Vorbis compressed) SoundFonts: when
+CMake doesn't find it, the plugin is built without SF3 support (with a
+warning; SF2 and DLS keep working, Options > Info shows it).
+
+### Linux
+
+Needs CMake >= 3.24, `libsndfile1-dev`, X11/OpenGL headers; `zenity` at
+runtime for the *Open...* dialog:
 
 ```sh
 cmake -B build-clap
 cmake --build build-clap -j$(nproc)
 cp build-clap/FluidSynthPlayer.clap ~/.clap/
 ```
+
+### Windows
+
+Needs CMake >= 3.24 and either Visual Studio 2022 (MSVC) or MinGW-w64
+(GCC). The GUI uses only system libraries (Win32, OpenGL 1.1, comdlg32);
+the C/C++ runtime is linked statically (`FSP_STATIC_RUNTIME`, on by
+default), so the `.clap` is a single file with no DLLs to ship.
+
+MSVC, with SF3 support through a static libsndfile from
+[vcpkg](https://vcpkg.io) (the `x64-windows-static` triplet matches the
+static runtime):
+
+```bat
+vcpkg install libsndfile:x64-windows-static
+cmake -B build-win -A x64 -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows-static
+cmake --build build-win --config Release
+```
+
+MinGW-w64 (e.g. MSYS2, scoop or winlibs GCC) with Ninja; add
+`-DCMAKE_TOOLCHAIN_FILE=...vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-mingw-static`
+for SF3 support, or leave it out to build without libsndfile:
+
+```bat
+cmake -G Ninja -B build-win -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+cmake --build build-win
+```
+
+Install by copying `FluidSynthPlayer.clap` into
+`C:\Program Files\Common Files\CLAP\` (all users) or
+`%LOCALAPPDATA%\Programs\Common\CLAP\` (current user). A libsndfile
+that is a DLL (e.g. MSYS2's) also works, but then it and its codec DLLs
+must be found by the *host* (next to the DAW's `.exe` or in `PATH`) - CMake
+warns about it; prefer a static one.
+
+On Windows the editor is a child window running on the host's UI thread
+(redrawn from a timer), *Open...* uses the native file dialog, SoundFonts
+can be dropped from Explorer, and the external editor is started through
+the shell (a full path, or a name registered in "App Paths", e.g.
+`polyphone`).
 
 Test without a DAW (renders audio, checks params/state; `gui` opens the
 window, `FLUIDSYNTHPLAYER_DEBUG_POPUP=patches|options|reverb` opens a popup
@@ -111,6 +157,11 @@ for screenshots; `test/clap/xdnd_drop.py` simulates a drag & drop onto it):
 ```sh
 ./build-clap/mini_host build-clap/FluidSynthPlayer.clap /usr/share/sounds/sf2/FluidR3_GM.sf2 [gui]
 ```
+
+On Windows `mini_host.exe` does the same (`gui` embeds the editor in a
+window of its own, like a DAW would); its checks assume a General MIDI
+SoundFont such as FluidR3_GM, e.g. `test\SimpleTestSoundfont.sf2` passes
+them all.
 
 The sources live in `src/clap/`; the vendored FluidSynth (LGPL-2.1),
 Signalsmith, CLAP headers, Dear ImGui, Font Awesome and Roboto (UI font,

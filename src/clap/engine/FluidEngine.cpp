@@ -5,7 +5,9 @@
 #include <clap/version.h>
 #include <fluidsynth.h>
 #include <imgui.h>
-#include <sndfile.h>
+#ifdef FSP_HAVE_SNDFILE
+#include <sndfile.h> // only for its version string (Options > Info)
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -726,9 +728,16 @@ std::vector<std::string> recentFluidLogLines() {
 }
 
 std::vector<ComponentVersion> componentVersions() {
+#ifdef FSP_HAVE_SNDFILE
     // sf_version_string() is "libsndfile-1.2.2" - keep just the number
     std::string sndfileVersion = sf_version_string() ? sf_version_string() : "?";
     if (sndfileVersion.rfind("libsndfile-", 0) == 0) sndfileVersion.erase(0, 11);
+    const char* sndfileRole = "SF3 decoding";
+#else
+    // Built without libsndfile (see CMakeLists.txt): SF3 can't be loaded.
+    const std::string sndfileVersion = "-";
+    const char* sndfileRole = "not built in: no SF3 support";
+#endif
     char clapVersion[32];
     snprintf(clapVersion, sizeof(clapVersion), "%d.%d.%d", CLAP_VERSION_MAJOR, CLAP_VERSION_MINOR,
              CLAP_VERSION_REVISION);
@@ -736,7 +745,7 @@ std::vector<ComponentVersion> componentVersions() {
         {"FluidSynth Player", FSP_PLUGIN_VERSION, "this CLAP plugin"},
         {"FluidSynthPlugin", FSP_UPSTREAM_VERSION, "upstream project it is based on (T. Tensi)"},
         {"FluidSynth", fluidRuntimeVersion(), "statically linked (DLS, SF3, Signalsmith)"},
-        {"libsndfile", sndfileVersion, "system library, SF3 decoding"},
+        {"libsndfile", sndfileVersion, sndfileRole},
         {"CLAP", clapVersion, "plugin API"},
         {"Dear ImGui", IMGUI_VERSION, "user interface"},
     };

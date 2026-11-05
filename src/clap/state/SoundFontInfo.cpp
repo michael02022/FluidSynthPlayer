@@ -1,13 +1,13 @@
 #include "state/SoundFontInfo.h"
 
-#include <strings.h>
-
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <vector>
+
+#include "platform.hpp"
 
 namespace {
 
@@ -78,10 +78,10 @@ void parseInfoList(std::ifstream& f, uint32_t listSize, SoundFontInfo& out) {
 bool readSoundFontInfo(const std::string& path, SoundFontInfo& out) {
     out = SoundFontInfo{};
     std::error_code ec;
-    out.fileSize = static_cast<uint64_t>(std::filesystem::file_size(path, ec));
+    out.fileSize = static_cast<uint64_t>(std::filesystem::file_size(platform::u8path(path), ec));
     if (ec) out.fileSize = 0;
 
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f(platform::u8path(path), std::ios::binary);
     if (!f) return false;
     unsigned char riff[12];
     if (!f.read(reinterpret_cast<char*>(riff), 12) || memcmp(riff, "RIFF", 4) != 0)
@@ -109,7 +109,7 @@ bool readSoundFontInfo(const std::string& path, SoundFontInfo& out) {
 }
 
 uint32_t scanDisabledControllers(const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f(platform::u8path(path), std::ios::binary);
     if (!f) return 0;
     unsigned char riff[12];
     if (!f.read(reinterpret_cast<char*>(riff), 12) || memcmp(riff, "RIFF", 4) != 0 ||
@@ -172,7 +172,7 @@ uint32_t scanDisabledControllers(const std::string& path) {
 }
 
 bool isSoundFontFile(const std::string& path) {
-    const auto ext = std::filesystem::path(path).extension().string();
-    return !strcasecmp(ext.c_str(), ".sf2") || !strcasecmp(ext.c_str(), ".sf3") ||
-           !strcasecmp(ext.c_str(), ".dls");
+    const auto ext = platform::u8string(platform::u8path(path).extension());
+    return !platform::strCaseCmp(ext.c_str(), ".sf2") || !platform::strCaseCmp(ext.c_str(), ".sf3") ||
+           !platform::strCaseCmp(ext.c_str(), ".dls");
 }

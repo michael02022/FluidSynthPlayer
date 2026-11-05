@@ -1,4 +1,5 @@
-#include "zenity_dialog.h"
+// Linux implementation of file_dialog.h via zenity(1).
+#include "file_dialog.h"
 
 #include <fcntl.h>
 #include <sys/wait.h>
@@ -60,14 +61,14 @@ std::string runZenity(const std::vector<std::string>& args) {
     return result;
 }
 
-void appendFilters(std::vector<std::string>& args, const std::vector<ZenityFilter>& filters) {
+void appendFilters(std::vector<std::string>& args, const std::vector<FileDialogFilter>& filters) {
     for (const auto& f : filters) args.push_back("--file-filter=" + f.name + " | " + f.pattern);
 }
 
 } // namespace
 
-std::string zenitySaveFile(const std::string& title, const std::string& defaultPath,
-                           const std::vector<ZenityFilter>& filters) {
+std::string saveFileDialog(const std::string& title, const std::string& defaultPath,
+                           const std::vector<FileDialogFilter>& filters) {
     std::vector<std::string> args = {
         "--file-selection", "--save", "--confirm-overwrite",
         "--title=" + title,
@@ -77,8 +78,8 @@ std::string zenitySaveFile(const std::string& title, const std::string& defaultP
     return runZenity(args);
 }
 
-std::string zenityOpenFile(const std::string& title, const std::string& defaultPath,
-                           const std::vector<ZenityFilter>& filters) {
+std::string openFileDialog(const std::string& title, const std::string& defaultPath,
+                           const std::vector<FileDialogFilter>& filters) {
     std::vector<std::string> args = {
         "--file-selection",
         "--title=" + title,
@@ -88,7 +89,7 @@ std::string zenityOpenFile(const std::string& title, const std::string& defaultP
     return runZenity(args);
 }
 
-std::string zenitySelectFolder(const std::string& title, const std::string& defaultPath) {
+std::string selectFolderDialog(const std::string& title, const std::string& defaultPath) {
     std::vector<std::string> args = {
         "--file-selection",
         "--directory",

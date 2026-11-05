@@ -1,3 +1,4 @@
+// Linux implementation of gui_window.hpp: X11 + GLX, own GUI thread.
 #include "gui_window.hpp"
 
 #include <GL/gl.h>
@@ -18,12 +19,7 @@
 #include "imgui.h"
 #include "backends/imgui_impl_opengl2.h"
 
-#include "IconsFontAwesome4.h"
-#include "fontawesome_data.hpp"
-
-// Thread-local ImGui context definition (see imconfig.h): each plugin
-// instance renders on its own thread with its own context.
-thread_local ImGuiContext* g_sclImGuiTls = nullptr;
+#include "imgui_setup.hpp"
 
 namespace {
 
@@ -246,6 +242,9 @@ void x11SetClipboardText(ImGuiContext*, const char* text) {
 
 } // namespace
 
+// Modal dialogs on Linux are separate zenity processes: no owner needed.
+void* guiCurrentNativeWindow() { return nullptr; }
+
 GuiWindow::GuiWindow(std::function<void()> drawUI,
                      std::function<void(const std::vector<std::string>&)> onFileDrop)
     : drawUI_(std::move(drawUI)), onFileDrop_(std::move(onFileDrop)) {}
@@ -271,9 +270,9 @@ void GuiWindow::destroy() {
     running_.store(false);
 }
 
-void GuiWindow::setParent(unsigned long x11Window) {
+void GuiWindow::setParent(uintptr_t x11Window) {
     std::lock_guard<std::mutex> l(cmdMutex_);
-    pendingParent_ = x11Window;
+    pendingParent_ = static_cast<unsigned long>(x11Window);
 }
 
 void GuiWindow::setVisible(bool visible) {
@@ -374,44 +373,14 @@ void GuiWindow::threadMain() {
     IMGUI_CHECKVERSION();
     ImGuiContext* ctx = ImGui::CreateContext();
     ImGui::SetCurrentContext(ctx);
+    setupEditorImGui();
     ImGuiIO& io = ImGui::GetIO();
-    io.IniFilename = nullptr; // no imgui.ini in the DAW's CWD
     io.DisplaySize = ImVec2((float)w, (float)h);
-    ImGui::StyleColorsDark();
-    ImGui::GetStyle().ScrollbarSize = 16.f;
 
     ImGuiPlatformIO& platformIO = ImGui::GetPlatformIO();
     platformIO.Platform_GetClipboardTextFn = x11GetClipboardText;
     platformIO.Platform_SetClipboardTextFn = x11SetClipboardText;
     platformIO.Platform_ClipboardUserData = &clipboardState;
-
-    // Fonts (all embedded in the binary, see fontawesome_data.hpp):
-    //   Fonts[0] = Roboto Medium  - body text, popups
-    //   Fonts[1] = Roboto Bold    - panel labels/fields
-    // each with Font Awesome 4 merged on top so a string can mix icon + text
-    // (ICON_FA_FOLDER " Open") without PushFont calls. Sizes are only the
-    // reference size: ImGui 1.92 rasterizes any size on demand
-    // (PushFont(font, size)).
-    {
-        static const ImWchar iconRanges[] = {ICON_MIN_FA, ICON_MAX_FA, 0};
-        auto addFont = [&](unsigned char* data, unsigned int len) {
-            ImFontConfig cfg;
-            // The buffers are global arrays embedded in the binary, not
-            // memory allocated by ImGui -- it must not free them.
-            cfg.FontDataOwnedByAtlas = false;
-            io.Fonts->AddFontFromMemoryTTF(data, (int)len, 14.f, &cfg);
-            ImFontConfig iconCfg;
-            iconCfg.MergeMode = true;
-            iconCfg.PixelSnapH = true;
-            iconCfg.FontDataOwnedByAtlas = false;
-            iconCfg.GlyphMinAdvanceX = 14.f;
-            io.Fonts->AddFontFromMemoryTTF(fontawesome_webfont_ttf,
-                                           (int)fontawesome_webfont_ttf_len, 14.f,
-                                           &iconCfg, iconRanges);
-        };
-        addFont(Roboto_Medium_ttf, Roboto_Medium_ttf_len);
-        addFont(Roboto_Bold_ttf, Roboto_Bold_ttf_len);
-    }
 
     ImGui_ImplOpenGL2_Init();
 

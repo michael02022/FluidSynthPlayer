@@ -16,11 +16,6 @@
 //   main/loader: collectGarbage() deletes whatever audio retired.
 #include <clap/clap.h>
 
-#include <fcntl.h>
-#include <strings.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -44,17 +39,26 @@
 #include "engine/FluidEngine.h"
 #include "gui/editor_ui.hpp"
 #include "gui/gui_window.hpp"
-#include "gui/zenity_dialog.h"
+#include "gui/file_dialog.h"
+#include "platform.hpp"
 #include "shared.hpp"
 #include "state/SoundFontInfo.h"
 
 namespace fs = std::filesystem;
+using platform::fileName;
+using platform::u8path;
 
 namespace {
 
 constexpr uint32_t kDefaultW = static_cast<uint32_t>(kEditorDesignW),
                    kDefaultH = static_cast<uint32_t>(kEditorDesignH);
 constexpr int kRetiredSlots = 8;
+
+#ifdef _WIN32
+const char* const kGuiApi = CLAP_WINDOW_API_WIN32;
+#else
+const char* const kGuiApi = CLAP_WINDOW_API_X11;
+#endif
 
 // Last sample rate any instance was activated at - the best guess for
 // building a SoundFont before activation (state restored on project load),
@@ -153,7 +157,7 @@ void retire(Plugin* p, FluidInstance* inst) {
 }
 
 std::string displayNameFor(const std::string& path, const SoundFontInfo& info) {
-    const std::string file = fs::path(path).filename().string();
+    const std::string file = fileName(path);
     if (info.name.empty() || info.name == file) return file;
     return info.name + "  -  " + file;
 }
@@ -163,11 +167,10 @@ std::string displayNameFor(const std::string& path, const SoundFontInfo& info) {
 // Cross-instance preferences (external editor, last folder, default
 // SoundFont): one small text file.
 
-std::string configFilePath() {
-    const char* xdg = getenv("XDG_CONFIG_HOME");
-    const char* home = getenv("HOME");
-    fs::path base = xdg && *xdg ? fs::path(xdg) : fs::path(home ? home : "/tmp") / ".config";
-    return (base / "FluidSynthPlayer" / "config.txt").string();
+// ~/.config/FluidSynthPlayer/config.txt on Linux,
+// %APPDATA%/FluidSynthPlayer/config.txt on Windows (see platform.hpp).
+fs::path configFilePath() {
+    return platform::userConfigDir() / "FluidSynthPlayer" / "config.txt";
 }
 
 void loadGlobalConfig(Plugin* p) {
@@ -250,7 +253,7 @@ bool buildAndPublish(Plugin* p, const Plugin::LoadJob& j) {
             gs.toast = msg;
             gs.toastIsError = true;
         } else if (!j.path.empty()) {
-            gs.toast = "Loaded " + fs::path(j.path).filename().string() + " (" +
+            gs.toast = "Loaded " + fileName(j.path) + " (" +
                        std::to_string(presets.size()) + " presets)";
             gs.toastIsError = false;
             if (info.disabledControllers && p->params.getInt(kParamRestoreControllers) == 0) {
@@ -314,7 +317,7 @@ void requestLoad(Plugin* p, const std::string& path, bool fromGui) {
         settingsText = p->params.guiState.fluidSettingsText;
         p->params.guiState.loading = true;
         p->params.guiState.loadingName =
-            path.empty() ? "(empty)" : fs::path(path).filename().string();
+            path.empty() ? "(empty)" : fileName(path);
     }
     {
         std::lock_guard<std::mutex> lock(p->loaderMutex);
@@ -331,11 +334,11 @@ void waitLoaderIdle(Plugin* p) {
 
 void loadFromGui(Plugin* p, const std::string& path) {
     if (!isSoundFontFile(path)) {
-        setToast(p, "Not a SoundFont file: " + fs::path(path).filename().string(), true);
+        setToast(p, "Not a SoundFont file: " + fileName(path), true);
         return;
     }
     std::error_code ec;
-    if (!fs::is_regular_file(path, ec)) {
+    if (!fs::is_regular_file(u8path(path), ec)) {
         setToast(p, "File not found: " + path, true);
         return;
     }
@@ -355,7 +358,7 @@ void setDefaultSoundFont(Plugin* p, const std::string& path) {
     }
     saveGlobalConfig(p);
     setToast(p, path.empty() ? std::string("Default SoundFont cleared")
-                             : "Default SoundFont: " + fs::path(path).filename().string() +
+                             : "Default SoundFont: " + fileName(path) +
                                    "\n(loaded by every new instance)",
              false);
 }
@@ -376,7 +379,7 @@ void maybeLoadDefaultSoundFont(Plugin* p, bool sync) {
     }
     if (path.empty()) return;
     std::error_code ec;
-    if (!fs::is_regular_file(path, ec)) {
+    if (!fs::is_regular_file(u8path(path), ec)) {
         setToast(p, "Default SoundFont not found: " + path, true);
         return;
     }
@@ -395,14 +398,15 @@ void maybeLoadDefaultSoundFont(Plugin* p, bool sync) {
 void rememberDir(Plugin* p, const std::string& path) {
     {
         std::lock_guard<std::mutex> lock(p->params.guiState.mutex);
-        p->params.guiState.lastDir = fs::path(path).parent_path().string();
+        p->params.guiState.lastDir = platform::parentDir(path);
     }
     saveGlobalConfig(p);
 }
 
-// Folder button: the pop-up file chooser (zenity, like the sibling
-// projects' preset dialogs). Starts in the loaded SoundFont's folder, else
-// the last one used, else the system SoundFont folder, else $HOME.
+// Folder button: the pop-up file chooser (zenity on Linux, like the sibling
+// projects' preset dialogs; the native dialog on Windows). Starts in the
+// loaded SoundFont's folder, else the last one used, else the system
+// SoundFont folder, else the home folder.
 void handleOpenDialog(Plugin* p) {
     std::string start;
     {
@@ -411,13 +415,9 @@ void handleOpenDialog(Plugin* p) {
         if (!gs.soundFontPath.empty()) start = gs.soundFontPath;
         else if (!gs.lastDir.empty()) start = gs.lastDir + "/";
     }
-    std::error_code ec;
-    if (start.empty())
-        start = fs::is_directory("/usr/share/sounds/sf2", ec)
-                    ? "/usr/share/sounds/sf2/"
-                    : std::string(getenv("HOME") ? getenv("HOME") : "") + "/";
+    if (start.empty()) start = platform::defaultSoundFontDir();
     const std::string path =
-        zenityOpenFile("Open SoundFont", start,
+        openFileDialog("Open SoundFont", start,
                        {{"SoundFonts (sf2, sf3, dls)", "*.sf2 *.SF2 *.sf3 *.SF3 *.dls *.DLS"},
                         {"All files", "*"}});
     if (path.empty()) return;
@@ -425,9 +425,8 @@ void handleOpenDialog(Plugin* p) {
     rememberDir(p, path);
 }
 
-// Launches the configured external SoundFont editor, fully detached
-// (double fork so no zombie is left behind and the editor outlives the
-// plugin/DAW if the user wants).
+// Launches the configured external SoundFont editor, fully detached (it
+// outlives the plugin/DAW if the user wants).
 void handleOpenExternalEditor(Plugin* p) {
     std::string editor, path;
     {
@@ -439,22 +438,10 @@ void handleOpenExternalEditor(Plugin* p) {
         setToast(p, "Set an external editor in the Advanced tab first", true);
         return;
     }
-    pid_t pid = fork();
-    if (pid == 0) {
-        setsid();
-        if (fork() == 0) {
-            int devnull = open("/dev/null", O_RDWR);
-            if (devnull >= 0) {
-                dup2(devnull, STDIN_FILENO);
-                dup2(devnull, STDOUT_FILENO);
-                dup2(devnull, STDERR_FILENO);
-            }
-            execlp(editor.c_str(), editor.c_str(), path.c_str(), static_cast<char*>(nullptr));
-            _exit(127);
-        }
-        _exit(0);
+    if (!platform::launchDetached(editor, path)) {
+        setToast(p, "Could not start " + editor, true);
+        return;
     }
-    if (pid > 0) waitpid(pid, nullptr, 0);
     setToast(p, "Opened in " + editor + " - use Reload after saving", false);
 }
 
@@ -562,7 +549,7 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text, doubl
         // Accept the display names of enum-like params too.
         auto match = [&](const char* const* names, int n) {
             for (int i = 0; i < n; ++i)
-                if (!strcasecmp(text, names[i])) {
+                if (!platform::strCaseCmp(text, names[i])) {
                     v = i;
                     return true;
                 }
@@ -575,8 +562,8 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text, doubl
         else if (id == kParamPortamentoTimeMode) ok = match(kPortaTimeModeNames, 3);
         else if (id == kParamMidiMode) ok = match(kMidiModeNames, 2);
         else if (id == kParamVoiceMode) ok = match(kVoiceModeNames, 3);
-        else if (!strcasecmp(text, "on")) { v = 1; ok = true; }
-        else if (!strcasecmp(text, "off")) { v = 0; ok = true; }
+        else if (!platform::strCaseCmp(text, "on")) { v = 1; ok = true; }
+        else if (!platform::strCaseCmp(text, "off")) { v = 0; ok = true; }
         if (!ok) return false;
     } else if (id == kParamGain && strstr(text, "dB")) {
         v = std::pow(10.0, v / 20.0);
@@ -770,12 +757,12 @@ bool stateLoad(const clap_plugin_t* plugin, const clap_istream_t* stream) {
     // the project again doesn't silently drop it) and reports it.
     waitLoaderIdle(p);
     std::error_code ec;
-    if (!path.empty() && !fs::is_regular_file(path, ec)) {
+    if (!path.empty() && !fs::is_regular_file(u8path(path), ec)) {
         Plugin::LoadJob empty{"", settings, false};
         buildAndPublish(p, empty);
         std::lock_guard<std::mutex> lock(p->params.guiState.mutex);
         p->params.guiState.soundFontPath = path;
-        p->params.guiState.soundFontName = fs::path(path).filename().string() + "  (missing!)";
+        p->params.guiState.soundFontName = fileName(path) + "  (missing!)";
         p->params.guiState.toast = "SoundFont not found: " + path;
         p->params.guiState.toastIsError = true;
         p->params.guiState.toastSetAt = std::chrono::steady_clock::now();
@@ -812,11 +799,11 @@ const clap_plugin_render_t kExtRender = {
 // -------------------------------------------------------------------- gui
 
 bool guiIsApiSupported(const clap_plugin_t*, const char* api, bool isFloating) {
-    return !isFloating && strcmp(api, CLAP_WINDOW_API_X11) == 0;
+    return !isFloating && api && strcmp(api, kGuiApi) == 0;
 }
 
 bool guiGetPreferredApi(const clap_plugin_t*, const char** api, bool* isFloating) {
-    *api = CLAP_WINDOW_API_X11;
+    *api = kGuiApi;
     *isFloating = false;
     return true;
 }
@@ -854,14 +841,14 @@ EditorCallbacks makeEditorCallbacks(Plugin* p) {
             start = !gs.defaultSoundFont.empty() ? gs.defaultSoundFont
                     : !gs.soundFontPath.empty()  ? gs.soundFontPath
                     : !gs.lastDir.empty()        ? gs.lastDir + "/"
-                                                 : std::string(getenv("HOME") ? getenv("HOME") : "") + "/";
+                                                 : platform::defaultSoundFontDir();
         }
-        const std::string path = zenityOpenFile(
+        const std::string path = openFileDialog(
             "Default SoundFont for new instances", start,
             {{"SoundFonts (sf2, sf3, dls)", "*.sf2 *.SF2 *.sf3 *.SF3 *.dls *.DLS"}, {"All files", "*"}});
         if (path.empty()) return;
         if (!isSoundFontFile(path)) {
-            setToast(p, "Not a SoundFont file: " + fs::path(path).filename().string(), true);
+            setToast(p, "Not a SoundFont file: " + fileName(path), true);
             return;
         }
         setDefaultSoundFont(p, path);
@@ -893,7 +880,7 @@ bool guiCreate(const clap_plugin_t* plugin, const char* api, bool isFloating) {
     p->window = std::make_unique<GuiWindow>(
         [p, callbacks] { drawEditorUI(p->params, p->uiState, *callbacks); },
         [p](const std::vector<std::string>& paths) {
-            // XDND drop: the first SoundFont among the dropped files is
+            // File drop (XDND / WM_DROPFILES): the first SoundFont among the dropped files is
             // loaded (one SoundFont per instance).
             for (const auto& path : paths) {
                 if (!isSoundFontFile(path)) continue;
@@ -951,7 +938,11 @@ bool guiSetSize(const clap_plugin_t* plugin, uint32_t w, uint32_t h) {
 bool guiSetParent(const clap_plugin_t* plugin, const clap_window_t* win) {
     Plugin* p = self(plugin);
     if (!p->window || !win) return false;
-    p->window->setParent(static_cast<unsigned long>(win->x11));
+#ifdef _WIN32
+    p->window->setParent(reinterpret_cast<uintptr_t>(win->win32));
+#else
+    p->window->setParent(static_cast<uintptr_t>(win->x11));
+#endif
     return true;
 }
 
@@ -1052,7 +1043,7 @@ bool plugActivate(const clap_plugin_t* plugin, double sampleRate, uint32_t, uint
             settings = p->params.guiState.fluidSettingsText;
         }
         std::error_code ec;
-        if (!path.empty() && !fs::is_regular_file(path, ec)) path.clear();
+        if (!path.empty() && !fs::is_regular_file(u8path(path), ec)) path.clear();
         std::vector<PresetEntry> presets;
         std::vector<std::string> warnings;
         std::string error;
