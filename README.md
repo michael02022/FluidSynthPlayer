@@ -42,6 +42,8 @@ interface over OpenGL2 - raw X11/GLX on Linux (the same GUI stack as the
 sibling projects SfzDrummer and SoloSampler), Win32/WGL on Windows - in a
 single compact panel (560x584, scales when resized):
 
+![FluidSynthPlayer CLAP plugin](./doc/clap/FluidSynthPlayer.png)
+
 - **SoundFont**: folder button (pop-up file chooser) or drag & drop a
   `.sf2` / `.sf3` / `.dls` file onto the window; the pencil button opens it
   in an external editor (configurable, e.g. Polyphone), right-click the
