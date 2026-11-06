@@ -127,8 +127,9 @@ Usage notes
 -----------
 - Load a SoundFont with the folder button or by dropping a file from
   Explorer onto the plugin window.
-- The pencil button opens the SoundFont in an external editor: set it in
-  Options > Advanced (full path to the .exe, e.g. Polyphone).
+- The pencil button opens the SoundFont in an external editor, by default
+  Polyphone at C:\Program Files\Polyphone\polyphone.exe; change it in
+  Options > Advanced (full path to the .exe).
 - Global preferences (default SoundFont, last folder, external editor) are
   stored in %APPDATA%\FluidSynthPlayer\config.txt.
 

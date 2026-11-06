@@ -817,8 +817,14 @@ void drawOptionsAdvanced(SharedParams& params, EditorUIState& ui, const EditorCa
     ImGui::InputText("##exteditor", ui.externalEditorBuf, sizeof(ui.externalEditorBuf));
     ImGui::SameLine();
     if (ImGui::Button("Save") && cb.setExternalEditor) cb.setExternalEditor(ui.externalEditorBuf);
+#ifdef _WIN32
+    dimWrapped("Program launched by the pencil button with the SoundFont path (e.g. "
+               "C:\\Program Files\\Polyphone\\polyphone.exe). Right-click the SoundFont "
+               "name to reload it after saving.");
+#else
     dimWrapped("Program launched by the pencil button with the SoundFont path (e.g. "
                "polyphone). Right-click the SoundFont name to reload it after saving.");
+#endif
 }
 
 void infoRow(const char* key, const std::string& value) {

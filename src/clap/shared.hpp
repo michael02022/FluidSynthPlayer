@@ -345,7 +345,13 @@ struct SharedParams {
         // Global, cross-instance preferences (config file, see plugin.cpp's
         // loadGlobalConfig): the external SoundFont editor executable and
         // the folder the "Open SoundFont" dialog starts in.
+        // Default: Polyphone - on Windows by the path its installer uses
+        // (it isn't on PATH there).
+#ifdef _WIN32
+        std::string externalEditor = "C:\\Program Files\\Polyphone\\polyphone.exe";
+#else
         std::string externalEditor = "polyphone";
+#endif
         std::string lastDir;
         // SoundFont a brand-new instance starts with ("" = none) - never
         // applied when the host restores a saved state (see plugin.cpp's
