@@ -161,7 +161,9 @@ else()
   )
 endif()
 
-add_library(fluidsynthplayer MODULE
+# All of the plugin's code, as a static library: each plugin format below is
+# just src/clap/clap_entry.cpp (the exported clap_entry) linked against it.
+add_library(fluidsynthplayer_impl STATIC
   src/clap/plugin.cpp
   src/clap/params.cpp
   src/clap/platform.cpp
@@ -178,12 +180,12 @@ add_library(fluidsynthplayer MODULE
   ${FSP_EMBEDDED_FONTS_CPP}
 )
 
-target_include_directories(fluidsynthplayer PRIVATE
+target_include_directories(fluidsynthplayer_impl PRIVATE
   src/clap
-  external/clap/include
   external/imgui
   external/fontawesome
 )
+target_include_directories(fluidsynthplayer_impl PUBLIC external/clap/include)
 
 # Versions shown in the plugin's info (CLAP descriptor + Options > Info):
 # this CLAP plugin's own (project() above) and the upstream FluidSynthPlugin
@@ -196,46 +198,80 @@ if(NOT FSP_UPSTREAM_VERSION)
   set(FSP_UPSTREAM_VERSION "unknown")
 endif()
 message(STATUS "FluidSynthPlayer ${PROJECT_VERSION}, based on FluidSynthPlugin ${FSP_UPSTREAM_VERSION}")
-target_compile_definitions(fluidsynthplayer PRIVATE
+target_compile_definitions(fluidsynthplayer_impl PRIVATE
   FSP_PLUGIN_VERSION="${PROJECT_VERSION}"
   FSP_UPSTREAM_VERSION="${FSP_UPSTREAM_VERSION}"
 )
 
-target_link_libraries(fluidsynthplayer PRIVATE
+target_link_libraries(fluidsynthplayer_impl PUBLIC
   libfluidsynth
   OpenGL::GL
   Threads::Threads
 )
 
 if(FSP_HAVE_SNDFILE)
-  target_compile_definitions(fluidsynthplayer PRIVATE FSP_HAVE_SNDFILE)
-  target_link_libraries(fluidsynthplayer PRIVATE SndFile::sndfile)
+  target_compile_definitions(fluidsynthplayer_impl PRIVATE FSP_HAVE_SNDFILE)
+  target_link_libraries(fluidsynthplayer_impl PUBLIC SndFile::sndfile)
 endif()
 
 if(WIN32)
-  target_compile_definitions(fluidsynthplayer PRIVATE
+  target_compile_definitions(fluidsynthplayer_impl PRIVATE
     NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS
     # imgui.cpp's Win32 clipboard/IME code uses the ANSI/Unicode-neutral
     # API names; everything of ours calls the explicit ...W functions.
     UNICODE _UNICODE)
-  target_link_libraries(fluidsynthplayer PRIVATE
+  target_link_libraries(fluidsynthplayer_impl PUBLIC
     user32 gdi32 shell32 comdlg32 ole32 uuid imm32)
   if(MSVC)
-    target_compile_options(fluidsynthplayer PRIVATE /utf-8 /bigobj)
-  elseif(MINGW AND FSP_STATIC_RUNTIME)
-    # libgcc, libstdc++ and winpthread inside the .clap (see above); the
-    # Windows system libraries stay DLL imports.
-    target_link_options(fluidsynthplayer PRIVATE -static)
+    target_compile_options(fluidsynthplayer_impl PRIVATE /utf-8 /bigobj)
   endif()
 else()
-  target_link_libraries(fluidsynthplayer PRIVATE X11::X11)
+  target_link_libraries(fluidsynthplayer_impl PUBLIC X11::X11)
 endif()
 
+# Settings every plugin format's module shares.
+function(fsp_plugin_module target)
+  target_sources(${target} PRIVATE src/clap/clap_entry.cpp)
+  target_link_libraries(${target} PRIVATE fluidsynthplayer_impl)
+  if(MINGW AND FSP_STATIC_RUNTIME)
+    # libgcc, libstdc++ and winpthread inside the plugin (see above); the
+    # Windows system libraries stay DLL imports.
+    target_link_options(${target} PRIVATE -static)
+  endif()
+endfunction()
+
+# ---------------------------------------------------------------- CLAP
+
+add_library(fluidsynthplayer MODULE)
+fsp_plugin_module(fluidsynthplayer)
 set_target_properties(fluidsynthplayer PROPERTIES
   PREFIX ""
   SUFFIX ".clap"
   OUTPUT_NAME "FluidSynthPlayer"
 )
+
+# ---------------------------------------------------------------- VST3
+#
+# FluidSynthPlayer.vst3 from the very same code through clap-wrapper
+# (external/clap-wrapper, with patches/clap-wrapper applied) and the VST3 SDK
+# subset in external/vst3sdk - nothing is downloaded. Built by `all` next to
+# the CLAP; target fluidsynthplayer_vst3.
+option(FSP_BUILD_VST3 "Also build the VST3 (clap-wrapper)" ON)
+if(FSP_BUILD_VST3)
+  set(CLAP_SDK_ROOT ${CMAKE_SOURCE_DIR}/external/clap)
+  set(VST3_SDK_ROOT ${CMAKE_SOURCE_DIR}/external/vst3sdk)
+  set(CLAP_WRAPPER_DOWNLOAD_DEPENDENCIES OFF CACHE BOOL "" FORCE)
+  set(CLAP_WRAPPER_BUILD_AUV2 OFF CACHE BOOL "" FORCE)
+  add_subdirectory(external/clap-wrapper EXCLUDE_FROM_ALL)
+
+  add_library(fluidsynthplayer_vst3 MODULE)
+  fsp_plugin_module(fluidsynthplayer_vst3)
+  target_add_vst3_wrapper(TARGET fluidsynthplayer_vst3
+    OUTPUT_NAME "FluidSynthPlayer"
+    BUNDLE_IDENTIFIER "com.michael02022.fluidsynthplayer.vst3"
+    BUNDLE_VERSION "${PROJECT_VERSION}"
+  )
+endif()
 
 # ---------------------------------------------------------------- test host
 #

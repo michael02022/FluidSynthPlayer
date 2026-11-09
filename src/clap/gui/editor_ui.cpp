@@ -146,19 +146,30 @@ bool isLogParam(ParamId id) {
            id == kParamLfoSpeed || id == kParamChorusSpeed;
 }
 
+// Log-like curve that starts at exactly 0 (the Hold fader): 0 at the
+// bottom, ~1 ms just above it, max at the top.
+bool isZeroLogParam(ParamId id) { return id == kParamEnvHold; }
+constexpr double kZeroLogBase = 20000.0;
+
 float toNorm(ParamId id, double v) {
     const auto& info = kParamInfos[id];
-    const float n = isLogParam(id)
-                        ? static_cast<float>(std::log(v / info.min) / std::log(info.max / info.min))
-                        : static_cast<float>((v - info.min) / (info.max - info.min));
+    float n;
+    if (isZeroLogParam(id))
+        n = static_cast<float>(std::log1p(std::max(v, 0.0) / info.max * (kZeroLogBase - 1.0)) /
+                               std::log(kZeroLogBase));
+    else if (isLogParam(id))
+        n = static_cast<float>(std::log(v / info.min) / std::log(info.max / info.min));
+    else
+        n = static_cast<float>((v - info.min) / (info.max - info.min));
     return std::clamp(n, 0.f, 1.f);
 }
 
 double fromNorm(ParamId id, float n) {
     const auto& info = kParamInfos[id];
     n = std::clamp(n, 0.f, 1.f);
-    double v = isLogParam(id) ? info.min * std::pow(info.max / info.min, n)
-                              : info.min + n * (info.max - info.min);
+    double v = isZeroLogParam(id) ? info.max * (std::pow(kZeroLogBase, n) - 1.0) / (kZeroLogBase - 1.0)
+               : isLogParam(id)   ? info.min * std::pow(info.max / info.min, n)
+                                  : info.min + n * (info.max - info.min);
     if (info.stepped) v = std::round(v);
     return v;
 }
@@ -352,7 +363,7 @@ void drawVSlider(const Layout& L, SharedParams& params, const EditorCallbacks& c
     ImGui::PopID();
 }
 
-// The narrow upright switch ("preset override" / "envelope override").
+// The narrow upright switch ("Override Send" / "envelope override").
 void drawOverrideSwitch(const Layout& L, SharedParams& params, const EditorCallbacks& cb,
                         ParamId id, float x, float y, const char* tooltip) {
     ImGui::PushID(static_cast<int>(id));
@@ -366,7 +377,7 @@ void drawOverrideSwitch(const Layout& L, SharedParams& params, const EditorCallb
     ImGui::PopID();
 }
 
-// Round "BUILT-IN" radio.
+// Round "ENABLE" radio.
 void drawRadio(const Layout& L, SharedParams& params, const EditorCallbacks& cb, ParamId id,
                float x, float y, const char* label, const char* tooltip) {
     ImGui::PushID(static_cast<int>(id));
@@ -609,6 +620,14 @@ int stdStringResize(ImGuiInputTextCallbackData* data) {
 }
 
 void drawOptionsGeneral(SharedParams& params, EditorUIState& ui, const EditorCallbacks& cb) {
+    sectionHeader("Window");
+    paramCombo(params, cb, kParamUiScale, "UI size", kUiScaleNames, kNumUiScales);
+    rowLabel("");
+    ImGui::PushStyleColor(ImGuiCol_Text, kDimText);
+    ImGui::TextWrapped("For DAWs that can't resize plugin windows. Saved with the project; new "
+                       "instances open at the last size chosen.");
+    ImGui::PopStyleColor();
+
     sectionHeader("Default SoundFont");
     {
         std::string def, current;
@@ -1049,8 +1068,8 @@ void drawHeader(SharedParams& params, EditorUIState& ui, const EditorCallbacks& 
     }
 }
 
-// REVERB / CHORUS: SETUP (effect unit settings), BUILT-IN radio,
-// preset-override switch and send LEVEL knob.
+// REVERB / CHORUS: SETUP (effect unit settings), ENABLE radio,
+// send-override switch and send LEVEL knob.
 void drawFxPanel(SharedParams& params, const EditorCallbacks& cb, const Layout& L, float x,
                  bool reverb) {
     const float y = 120;
@@ -1063,10 +1082,10 @@ void drawFxPanel(SharedParams& params, const EditorCallbacks& cb, const Layout& 
     if (drawButton(L, "##setup", x + 14, y + 34, 106, 30, ICON_FA_SLIDERS "  SETUP",
                    reverb ? "Built-in reverb settings" : "Built-in chorus settings", 13.f))
         ImGui::OpenPopup("##setup");
-    drawRadio(L, params, cb, on, x + 14, y + 78, "BUILT-IN",
-              reverb ? "Use FluidSynth's built-in reverb" : "Use FluidSynth's built-in chorus");
+    drawRadio(L, params, cb, on, x + 14, y + 78, "ENABLE",
+              reverb ? "Enable FluidSynth's built-in reverb" : "Enable FluidSynth's built-in chorus");
     const bool builtin = params.getInt(on) != 0;
-    drawOverrideSwitch(L, params, cb, ovr, x + 160, y + 42, "Preset override");
+    drawOverrideSwitch(L, params, cb, ovr, x + 160, y + 42, "Override Send");
     drawKnob(L, params, cb, send, x + 214, y + 52, 26, "LEVEL", builtin && params.getInt(ovr) != 0);
 
     ImGui::SetNextWindowPos(L.p(x + 14, y + 66));
@@ -1193,20 +1212,22 @@ void drawEditorUI(SharedParams& params, EditorUIState& ui, const EditorCallbacks
     drawFxPanel(params, cb, L, 8, true);
     drawFxPanel(params, cb, L, 284, false);
 
-    // ENVELOPE: A/D/R scale the preset's own times, S shifts its sustain
-    // level; the switch next to the label turns the override on.
+    // ENVELOPE: with the switch next to the label on, A/H/D/S/R replace the
+    // preset's volume envelope (absolute times / sustain level).
     {
         const float x = 8, y = 234;
         drawPanel(L, x, y, 268, 300, "ENVELOPE");
         drawOverrideSwitch(L, params, cb, kParamEnvEnable, x + 104, y + 4, "Envelope override");
         const bool on = params.getInt(kParamEnvEnable) != 0;
         const float top = y + 46, bot = y + 256;
-        drawVSlider(L, params, cb, kParamEnvAttack, x + 44, top, bot, "A", on);
-        drawVSlider(L, params, cb, kParamEnvDecay, x + 104, top, bot, "D", on);
-        drawVSlider(L, params, cb, kParamEnvSustain, x + 164, top, bot, "S", on);
-        drawVSlider(L, params, cb, kParamEnvRelease, x + 224, top, bot, "R", on);
+        drawVSlider(L, params, cb, kParamEnvAttack, x + 38, top, bot, "A", on);
+        drawVSlider(L, params, cb, kParamEnvHold, x + 86, top, bot, "H", on);
+        drawVSlider(L, params, cb, kParamEnvDecay, x + 134, top, bot, "D", on);
+        drawVSlider(L, params, cb, kParamEnvSustain, x + 182, top, bot, "S", on);
+        drawVSlider(L, params, cb, kParamEnvRelease, x + 230, top, bot, "R", on);
     }
-    // LFO (vibrato): AMT 0 leaves each preset's own vibrato alone.
+    // LFO (vibrato): AMT 0 leaves each preset's own vibrato alone; above 0
+    // the three knobs replace it.
     {
         const float x = 284, y = 234;
         drawPanel(L, x, y, 268, 142, "LFO");

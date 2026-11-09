@@ -20,16 +20,32 @@
 
 namespace {
 
-// SF2 generator defaults the offsets below are computed against (SF2.04
-// spec, section 8.1.3): vibrato LFO at 8.176 Hz (0 abs cents) with a
-// -12000 timecent (~1 ms) delay.
+// SF2 generator units (SF2.04 spec, section 8.1.3): LFO frequency in
+// absolute cents of 8.176 Hz, delays in timecents down to -12000 (~1 ms).
 constexpr double kSf2VibLfoBaseHz = 8.176;
 constexpr double kSf2MinDelayTimecents = -12000.0;
 // Upper bound of the Polyphony param - sizes FluidInstance::voiceBuf.
 constexpr int kMaxPolyphony = 1024;
 
-double timecentsFromMultiplier(double mult) {
-    return 1200.0 * std::log2(std::max(mult, 1e-6));
+float timecentsFromSeconds(double seconds) {
+    return static_cast<float>(1200.0 * std::log2(std::max(seconds, 1e-6)));
+}
+
+struct GenValue {
+    int gen;
+    float value;
+};
+
+// The LFO panel's vibrato, set on a voice in place of the preset's own
+// (only used while AMT > 0 - at 0 the preset's vibrato stays untouched).
+// Index 2, the delay, only matters to voices that are just starting.
+std::array<GenValue, 3> vibratoGens(const SharedParams& params) {
+    const double delay = params.values[kParamLfoDelay].load();
+    return {{{GEN_VIBLFOTOPITCH, static_cast<float>(params.values[kParamLfoAmount].load())},
+             {GEN_VIBLFOFREQ, static_cast<float>(1200.0 * std::log2(params.values[kParamLfoSpeed].load() /
+                                                                    kSf2VibLfoBaseHz))},
+             {GEN_VIBLFODELAY, delay > 0.001 ? timecentsFromSeconds(delay)
+                                             : static_cast<float>(kSf2MinDelayTimecents)}}};
 }
 
 // ------------------------------------------------------------ log capture
@@ -102,15 +118,46 @@ const std::array<fluid_mod_t*, kNumStandardControllers>& standardModulators() {
     return mods;
 }
 
-// "Restore MIDI controllers": puts the disabled default modulators back on
-// the voices the last note-on just started on `ch` (they haven't rendered
-// yet) by overwriting the SoundFont's zero-amount copies. The voice's
-// modulator sums were already computed at note-on, and the public API has
-// no "recompute modulators" call - re-sending the channel's current value
-// of each restored controller is exactly what makes fluidsynth recompute
-// them (same path as a real incoming CC, idempotent for every other voice).
-void patchNewVoices(FluidInstance& inst, int ch, int channelPressure) {
+// Patches the voices the last note-on just started on `ch` (they haven't
+// rendered yet). Runs on every note-on, so lastPatchedVoiceId always tracks
+// the newest voice and switching an option on never touches notes that are
+// already sounding.
+//
+// Envelope override: replaces the volume envelope's attack, hold, decay,
+// sustain and release with the panel's absolute values - fluid_voice_gen_set
+// sets the voice's own generator value, where fluid_synth_set_gen would only
+// add an offset. Delay, key-to-hold/decay and the modulation envelope stay
+// the preset's.
+//
+// LFO (AMT > 0): replaces the vibrato's depth, speed and delay the same way
+// (CC1 / aftertouch keep adding depth through their modulators).
+//
+// "Restore MIDI controllers": puts the disabled default modulators back by
+// overwriting the SoundFont's zero-amount copies. The voice's modulator
+// sums were already computed at note-on, and the public API has no
+// "recompute modulators" call - re-sending the channel's current value of
+// each restored controller is exactly what makes fluidsynth recompute them
+// (same path as a real incoming CC, idempotent for every other voice).
+void patchNewVoices(FluidInstance& inst, const SharedParams& params, int ch, int channelPressure) {
     if (inst.voiceBuf.empty()) return;
+    const bool restore = inst.disabledControllers &&
+                         std::lround(params.values[kParamRestoreControllers].load()) != 0;
+    const bool envelope = std::lround(params.values[kParamEnvEnable].load()) != 0;
+    const bool vibrato = params.values[kParamLfoAmount].load() > 0.0;
+    const std::array<GenValue, 3> vibGens = vibratoGens(params);
+    std::array<GenValue, 5> envGens{};
+    const double hold = params.values[kParamEnvHold].load();
+    if (envelope)
+        envGens = {{{GEN_VOLENVATTACK, timecentsFromSeconds(params.values[kParamEnvAttack].load())},
+                    // hold 0 = the SF2 minimum (~1 ms, no hold)
+                    {GEN_VOLENVHOLD, hold > 0.001 ? timecentsFromSeconds(hold)
+                                                  : static_cast<float>(kSf2MinDelayTimecents)},
+                    {GEN_VOLENVDECAY, timecentsFromSeconds(params.values[kParamEnvDecay].load())},
+                    // dB below full -> SF2 attenuation in centibels
+                    {GEN_VOLENVSUSTAIN,
+                     static_cast<float>(-params.values[kParamEnvSustain].load() * 10.0)},
+                    {GEN_VOLENVRELEASE, timecentsFromSeconds(params.values[kParamEnvRelease].load())}}};
+
     fluid_synth_get_voicelist(inst.synth, inst.voiceBuf.data(),
                               static_cast<int>(inst.voiceBuf.size()), -1);
     const auto& mods = standardModulators();
@@ -120,12 +167,30 @@ void patchNewVoices(FluidInstance& inst, int ch, int channelPressure) {
         const int64_t id = fluid_voice_get_id(v);
         if (id <= inst.lastPatchedVoiceId) continue;
         newest = std::max(newest, id);
-        for (int b = 0; b < kNumStandardControllers; ++b)
-            if (inst.disabledControllers & (1u << b))
-                fluid_voice_add_mod(v, mods[b], FLUID_VOICE_OVERWRITE);
+        if (envelope)
+            for (const GenValue& g : envGens) {
+                fluid_voice_gen_set(v, g.gen, g.value);
+                fluid_voice_update_param(v, g.gen);
+            }
+        if (vibrato)
+            for (const GenValue& g : vibGens) {
+                fluid_voice_gen_set(v, g.gen, g.value);
+                fluid_voice_update_param(v, g.gen);
+            }
+        if (restore)
+            for (int b = 0; b < kNumStandardControllers; ++b)
+                if (inst.disabledControllers & (1u << b))
+                    fluid_voice_add_mod(v, mods[b], FLUID_VOICE_OVERWRITE);
     }
     if (newest == inst.lastPatchedVoiceId) return; // nothing new was started
     inst.lastPatchedVoiceId = newest;
+    // fluid_voice_update_param only queues the change for the running
+    // voice; fluidsynth commits that queue when a synth API call returns.
+    // Without one before the next render, a short attack/decay would
+    // already be over when the new envelope arrives. (The CC re-sends
+    // below are such calls too.)
+    if (envelope || vibrato) fluid_synth_get_active_voice_count(inst.synth);
+    if (!restore) return;
 
     static const int kCcOfBit[kNumStandardControllers] = {1, 7, 10, 11, 91, 93, -1, -1};
     for (int b = 0; b < kNumStandardControllers; ++b) {
@@ -403,41 +468,28 @@ void applyParams(FluidInstance& inst, SharedParams& params) {
         for (int c = 0; c < kNumMidiChannels; ++c)
             fluid_synth_pitch_wheel_sens(s, c, asInt(kParamBendRange));
 
+    // LFO (AMT > 0): new notes get the panel's vibrato in place of the
+    // preset's (patchNewVoices); turning AMT/SPD also retunes the vibrato
+    // of the notes already sounding. The delay only matters to new notes.
+    if (any({kParamLfoAmount, kParamLfoSpeed}) && v[kParamLfoAmount] > 0.0 &&
+        !inst.voiceBuf.empty()) {
+        const std::array<GenValue, 3> vib = vibratoGens(params);
+        fluid_synth_get_voicelist(s, inst.voiceBuf.data(), static_cast<int>(inst.voiceBuf.size()),
+                                  -1);
+        for (fluid_voice_t* voice : inst.voiceBuf) {
+            if (!voice) break;
+            for (int i = 0; i < 2; ++i) {
+                fluid_voice_gen_set(voice, vib[i].gen, vib[i].value);
+                fluid_voice_update_param(voice, vib[i].gen);
+            }
+        }
+        fluid_synth_get_active_voice_count(s); // commits the queued updates
+    }
+
     // Generator offsets, identical on every channel (FluidSynth adds
     // API-set generator values on top of the preset's own - see
-    // shared.hpp's kParamInfos comment for the units).
-    if (any({kParamEnvEnable, kParamEnvAttack, kParamEnvDecay, kParamEnvSustain,
-             kParamEnvRelease})) {
-        const bool on = asInt(kParamEnvEnable) != 0;
-        const float atk = on ? static_cast<float>(timecentsFromMultiplier(v[kParamEnvAttack])) : 0.f;
-        const float dec = on ? static_cast<float>(timecentsFromMultiplier(v[kParamEnvDecay])) : 0.f;
-        const float rel = on ? static_cast<float>(timecentsFromMultiplier(v[kParamEnvRelease])) : 0.f;
-        // + dB louder = less attenuation (centibels)
-        const float sus = on ? static_cast<float>(-v[kParamEnvSustain] * 10.0) : 0.f;
-        for (int c = 0; c < kNumMidiChannels; ++c) {
-            fluid_synth_set_gen(s, c, GEN_VOLENVATTACK, atk);
-            fluid_synth_set_gen(s, c, GEN_VOLENVDECAY, dec);
-            fluid_synth_set_gen(s, c, GEN_VOLENVSUSTAIN, sus);
-            fluid_synth_set_gen(s, c, GEN_VOLENVRELEASE, rel);
-        }
-    }
-    if (any({kParamLfoAmount, kParamLfoSpeed, kParamLfoDelay})) {
-        // Speed/delay only override the SoundFont's own vibrato while this
-        // LFO is actually in use - at Amount 0 the preset is left untouched.
-        const bool on = v[kParamLfoAmount] > 0.0;
-        const float depth = static_cast<float>(v[kParamLfoAmount]);
-        const float freq =
-            on ? static_cast<float>(1200.0 * std::log2(v[kParamLfoSpeed] / kSf2VibLfoBaseHz)) : 0.f;
-        const float delay = (on && v[kParamLfoDelay] > 0.001)
-                                ? static_cast<float>(1200.0 * std::log2(v[kParamLfoDelay]) -
-                                                     kSf2MinDelayTimecents)
-                                : 0.f;
-        for (int c = 0; c < kNumMidiChannels; ++c) {
-            fluid_synth_set_gen(s, c, GEN_VIBLFOTOPITCH, depth);
-            fluid_synth_set_gen(s, c, GEN_VIBLFOFREQ, freq);
-            fluid_synth_set_gen(s, c, GEN_VIBLFODELAY, delay);
-        }
-    }
+    // shared.hpp's kParamInfos comment for the units). The envelope and
+    // LFO aren't among them: they replace values, see patchNewVoices.
     if (any({kParamCutoff, kParamResonance, kParamFineTune})) {
         for (int c = 0; c < kNumMidiChannels; ++c) {
             fluid_synth_set_gen(s, c, GEN_FILTERFC, static_cast<float>(v[kParamCutoff] * 100.0));
@@ -560,9 +612,7 @@ void handleMidi(FluidInstance& inst, SharedParams& params, ControllerShadow& sha
                     fluid_synth_noteoff(s, ch, inst.heldKey[inChannel][d1]);
                 inst.heldKey[inChannel][d1] = static_cast<int16_t>(key);
                 fluid_synth_noteon(s, ch, key, d2);
-                if (inst.disabledControllers &&
-                    std::lround(params.values[kParamRestoreControllers].load()) != 0)
-                    patchNewVoices(inst, ch, shadow.channelPressure[ch]);
+                patchNewVoices(inst, params, ch, shadow.channelPressure[ch]);
                 params.noteActive[d1].store(true);
                 params.noteVelocity01[d1].store(d2 / 127.f);
                 params.channelActivity[inChannel].store(d2 / 127.f);

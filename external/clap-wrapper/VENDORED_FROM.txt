@@ -1,0 +1,11 @@
+clap-wrapper 0.17.0 (https://github.com/free-audio/clap-wrapper, branch main,
+commit 806bba0a5f792e3966b99c1561ab9952d3316d7c), cloned without its .git
+directory, with patches/clap-wrapper/0001-vst3-midi-values-and-program-change-order.patch
+applied (exact MIDI controller values and program change after bank select in
+the VST3 wrapper - see the patch header).
+
+To update: clone the new commit here, delete its .git, then
+  git apply ../../patches/clap-wrapper/*.patch   (from external/clap-wrapper)
+
+License: MIT (see LICENSE). Builds FluidSynthPlayer.vst3 from the same code
+as the CLAP (see FSP_BUILD_VST3 in the top CMakeLists.txt).

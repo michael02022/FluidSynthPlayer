@@ -5,7 +5,7 @@
 // effects (loading, host notification, dialogs).
 //
 // Compact single-panel layout: SoundFont name + folder/edit buttons, patch
-// name with prev/next arrows, REVERB / CHORUS (built-in + preset override +
+// name with prev/next arrows, REVERB / CHORUS (enable + override send +
 // level), ENVELOPE sliders, LFO and MISC knobs, and an Options gear for
 // everything else. Everything is drawn on a fixed 560x584 design grid
 // scaled uniformly to the window size.

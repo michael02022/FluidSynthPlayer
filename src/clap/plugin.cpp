@@ -69,7 +69,10 @@ struct Plugin {
     clap_plugin_t plug{};
     const clap_host_t* host = nullptr;
     const clap_host_params_t* hostParams = nullptr;
+    const clap_host_gui_t* hostGui = nullptr;
     std::unique_ptr<GuiWindow> window;
+    // UI Size changed: ask the host for the new window size (main thread).
+    std::atomic<bool> uiResizePending{false};
     SharedParams params;
     EditorUIState uiState;
 
@@ -127,6 +130,22 @@ void requestParamFlush(Plugin* p) {
     if (p->hostParams && p->hostParams->request_flush) p->hostParams->request_flush(p->host);
 }
 
+// Editor window size for the UI Size param (100/75% of the design size).
+void uiScaledSize(const Plugin* p, uint32_t& w, uint32_t& h) {
+    const double f = kUiScaleFactors[std::clamp(p->params.getInt(kParamUiScale), 0, kNumUiScales - 1)];
+    w = static_cast<uint32_t>(std::lround(kDefaultW * f));
+    h = static_cast<uint32_t>(std::lround(kDefaultH * f));
+}
+
+// The resize request itself goes out from the main thread (plugOnMainThread):
+// VST3 hosts expect IPlugFrame::resizeView there.
+void requestUiResize(Plugin* p) {
+    p->uiResizePending.store(true);
+    if (p->host && p->host->request_callback) p->host->request_callback(p->host);
+}
+
+void saveGlobalConfig(Plugin* p);
+
 // GUI/loader-originated parameter change: store it and make sure the host
 // hears about it (emitted as CLAP events by the next process()/flush()).
 void setParamFromUi(Plugin* p, ParamId id, double value) {
@@ -135,6 +154,14 @@ void setParamFromUi(Plugin* p, ParamId id, double value) {
     p->params.values[id].store(value);
     p->params.guiValueDirty[id].store(true);
     requestParamFlush(p);
+    if (id == kParamUiScale) {
+        {
+            std::lock_guard<std::mutex> lock(p->params.guiState.mutex);
+            p->params.guiState.uiScale = static_cast<int>(std::lround(value));
+        }
+        saveGlobalConfig(p); // new instances open at the last chosen size
+        requestUiResize(p);
+    }
 }
 
 void collectGarbage(Plugin* p) {
@@ -183,16 +210,20 @@ void loadGlobalConfig(Plugin* p) {
         if (line.rfind("lastdir=", 0) == 0) gs.lastDir = line.substr(8);
         else if (line.rfind("defaultsf=", 0) == 0) gs.defaultSoundFont = line.substr(10);
         else if (line.rfind("editor=", 0) == 0) gs.externalEditor = line.substr(7);
+        else if (line.rfind("uiscale=", 0) == 0)
+            gs.uiScale = std::clamp(atoi(line.c_str() + 8), 0, kNumUiScales - 1);
     }
 }
 
 void saveGlobalConfig(Plugin* p) {
     std::string editor, lastDir, defaultSf;
+    int uiScale = 0;
     {
         std::lock_guard<std::mutex> lock(p->params.guiState.mutex);
         editor = p->params.guiState.externalEditor;
         lastDir = p->params.guiState.lastDir;
         defaultSf = p->params.guiState.defaultSoundFont;
+        uiScale = p->params.guiState.uiScale;
     }
     const fs::path path = configFilePath();
     std::error_code ec;
@@ -202,6 +233,7 @@ void saveGlobalConfig(Plugin* p) {
     out << "editor=" << editor << "\n";
     if (!lastDir.empty()) out << "lastdir=" << lastDir << "\n";
     if (!defaultSf.empty()) out << "defaultsf=" << defaultSf << "\n";
+    if (uiScale != 0) out << "uiscale=" << uiScale << "\n";
 }
 
 // ------------------------------------------------------------ loading
@@ -450,8 +482,9 @@ void handleOpenExternalEditor(Plugin* p) {
 #define CLAP_STR_(x) #x
 #define CLAP_STR(x) CLAP_STR_(x)
 
-const char* kFeatures[] = {CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_SYNTHESIZER,
-                           CLAP_PLUGIN_FEATURE_SAMPLER, CLAP_PLUGIN_FEATURE_STEREO, nullptr};
+// clap-wrapper turns these into the VST3 subcategories "Instrument|Sampler".
+const char* kFeatures[] = {CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_SAMPLER,
+                           CLAP_PLUGIN_FEATURE_STEREO, nullptr};
 
 const clap_plugin_descriptor_t kDesc = {
     .clap_version = CLAP_VERSION_INIT,
@@ -518,8 +551,11 @@ bool paramsGetInfo(const clap_plugin_t*, uint32_t index, clap_param_info_t* info
     if (pi.stepped) info->flags |= CLAP_PARAM_IS_STEPPED;
     if (pi.id == kParamInterpolation || pi.id == kParamRenderInterpolation ||
         pi.id == kParamMidiMode || pi.id == kParamVoiceMode ||
-        pi.id == kParamReverbEngine || pi.id == kParamPortamentoTimeMode)
+        pi.id == kParamReverbEngine || pi.id == kParamPortamentoTimeMode ||
+        pi.id == kParamUiScale)
         info->flags |= CLAP_PARAM_IS_ENUM;
+    // A view setting, not sound: kept in the state, kept out of hosts' lists.
+    if (pi.id == kParamUiScale) info->flags |= CLAP_PARAM_IS_HIDDEN;
     info->cookie = nullptr;
     snprintf(info->name, sizeof(info->name), "%s", pi.name);
     snprintf(info->module, sizeof(info->module), "%s", pi.module);
@@ -543,6 +579,12 @@ bool paramsValueToText(const clap_plugin_t*, clap_id id, double value, char* out
 
 bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text, double* out) {
     if (id >= kNumParams || !text) return false;
+    if (id == kParamUiScale) // names that start with a number ("75%")
+        for (int i = 0; i < kNumUiScales; ++i)
+            if (!platform::strCaseCmp(text, kUiScaleNames[i])) {
+                *out = i;
+                return true;
+            }
     char* end = nullptr;
     double v = strtod(text, &end);
     if (end == text) {
@@ -560,6 +602,7 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text, doubl
         else if (id == kParamRenderInterpolation) ok = match(kRenderInterpNames, kNumInterpModes + 1);
         else if (id == kParamReverbEngine) ok = match(kReverbEngineNames, kNumReverbEngines);
         else if (id == kParamPortamentoTimeMode) ok = match(kPortaTimeModeNames, 3);
+        else if (id == kParamUiScale) ok = match(kUiScaleNames, kNumUiScales);
         else if (id == kParamMidiMode) ok = match(kMidiModeNames, 2);
         else if (id == kParamVoiceMode) ok = match(kVoiceModeNames, 3);
         else if (!platform::strCaseCmp(text, "on")) { v = 1; ok = true; }
@@ -567,9 +610,10 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text, doubl
         if (!ok) return false;
     } else if (id == kParamGain && strstr(text, "dB")) {
         v = std::pow(10.0, v / 20.0);
-    } else if ((id == kParamEnvAttack || id == kParamEnvDecay || id == kParamEnvRelease) &&
-               text[0] == 'x') {
-        v = strtod(text + 1, nullptr);
+    } else if ((id == kParamEnvAttack || id == kParamEnvHold || id == kParamEnvDecay ||
+                id == kParamEnvRelease) &&
+               strstr(text, "ms")) {
+        v /= 1000.0; // "300 ms" - a bare number is seconds
     }
     const auto& info = kParamInfos[id];
     *out = std::clamp(v, info.min, info.max);
@@ -580,7 +624,9 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text, doubl
 void handleParamEvent(Plugin* p, const clap_event_param_value_t* ev) {
     if (ev->param_id >= kNumParams) return;
     const auto& info = kParamInfos[ev->param_id];
-    p->params.values[ev->param_id].store(std::clamp(ev->value, info.min, info.max));
+    const double v = std::clamp(ev->value, info.min, info.max);
+    const double old = p->params.values[ev->param_id].exchange(v);
+    if (ev->param_id == kParamUiScale && v != old) requestUiResize(p); // thread-safe
 }
 
 // Emits the GUI-originated gesture/value events and pending MIDI-driven
@@ -643,7 +689,8 @@ const clap_plugin_params_t kExtParams = {
 // itself is referenced by path, never embedded.
 
 constexpr uint32_t kStateMagic = 0x4C505346; // "FSPL"
-constexpr uint32_t kStateVersion = 1;
+// 2: envelope A/D/S/R are absolute (seconds / dB), no longer multipliers.
+constexpr uint32_t kStateVersion = 2;
 
 bool streamWriteAll(const clap_ostream_t* s, const void* data, uint64_t size) {
     const auto* ptr = static_cast<const uint8_t*>(data);
@@ -736,6 +783,11 @@ bool stateLoad(const clap_plugin_t* plugin, const clap_istream_t* stream) {
     // Saved before FluidSynth 2.6 support: those projects were mixed with
     // 2.5's only reverb, FDN - keep it instead of 2.6's new default.
     if (!hasReverbEngine) values[kParamReverbEngine] = kReverbEngineFdn;
+    // Version 1 stored envelope multipliers/dB shifts relative to each
+    // preset, which have no absolute equivalent: start from the defaults.
+    if (version < 2)
+        for (ParamId id : {kParamEnvAttack, kParamEnvDecay, kParamEnvSustain, kParamEnvRelease})
+            values[id] = kParamInfos[id].def;
     std::array<int32_t, kNumMidiChannels> banks{}, progs{};
     for (int c = 0; c < kNumMidiChannels; ++c)
         if (!readVal(stream, banks[c]) || !readVal(stream, progs[c])) return false;
@@ -770,6 +822,7 @@ bool stateLoad(const clap_plugin_t* plugin, const clap_istream_t* stream) {
         buildAndPublish(p, {path, settings, false});
     }
     if (p->hostParams && p->hostParams->rescan) p->hostParams->rescan(p->host, CLAP_PARAM_RESCAN_VALUES);
+    requestUiResize(p); // the project's own UI Size, if the editor is open
     return true;
 }
 
@@ -890,7 +943,9 @@ bool guiCreate(const clap_plugin_t* plugin, const char* api, bool isFloating) {
             }
             setToast(p, "Drop a SoundFont file (.sf2, .sf3 or .dls)", true);
         });
-    return p->window->create(kDefaultW, kDefaultH);
+    uint32_t w, h;
+    uiScaledSize(p, w, h);
+    return p->window->create(w, h);
 }
 
 void guiDestroy(const clap_plugin_t* plugin) {
@@ -906,10 +961,7 @@ bool guiSetScale(const clap_plugin_t*, double) { return true; }
 bool guiGetSize(const clap_plugin_t* plugin, uint32_t* w, uint32_t* h) {
     Plugin* p = self(plugin);
     if (p->window) p->window->getSize(*w, *h);
-    else {
-        *w = kDefaultW;
-        *h = kDefaultH;
-    }
+    else uiScaledSize(p, *w, *h);
     return true;
 }
 
@@ -988,7 +1040,11 @@ bool plugInit(const clap_plugin_t* plugin) {
     installFluidLogHook();
     p->hostParams = static_cast<const clap_host_params_t*>(
         p->host->get_extension(p->host, CLAP_EXT_PARAMS));
+    p->hostGui = static_cast<const clap_host_gui_t*>(p->host->get_extension(p->host, CLAP_EXT_GUI));
     loadGlobalConfig(p);
+    // A new instance opens at the last UI Size chosen (a restored project
+    // brings its own value with its state).
+    p->params.values[kParamUiScale].store(p->params.guiState.uiScale);
     p->loaderThread = std::thread(loaderMain, p);
     return true;
 }
@@ -1224,7 +1280,18 @@ const void* plugGetExtension(const clap_plugin_t*, const char* id) {
     return nullptr;
 }
 
-void plugOnMainThread(const clap_plugin_t* plugin) { collectGarbage(self(plugin)); }
+void plugOnMainThread(const clap_plugin_t* plugin) {
+    Plugin* p = self(plugin);
+    collectGarbage(p);
+    if (p->uiResizePending.exchange(false) && p->window) {
+        uint32_t w, h;
+        uiScaledSize(p, w, h);
+        // An accepted request needn't be followed by set_size from the host
+        // (clap.gui), so the window follows on its own.
+        if (p->hostGui && p->hostGui->request_resize && p->hostGui->request_resize(p->host, w, h))
+            p->window->setSize(w, h);
+    }
+}
 
 // ---------------------------------------------------------------- factory
 
@@ -1260,18 +1327,13 @@ const clap_plugin_factory_t kFactory = {
     .create_plugin = factoryCreate,
 };
 
-bool entryInit(const char*) { return true; }
-void entryDeinit() {}
-const void* entryGetFactory(const char* id) {
+} // namespace
+
+// Exported as clap_entry by clap_entry.cpp, compiled into each plugin format
+// (the .clap itself and the clap-wrapper VST3).
+bool fspEntryInit(const char*) { return true; }
+void fspEntryDeinit() {}
+const void* fspEntryGetFactory(const char* id) {
     if (!strcmp(id, CLAP_PLUGIN_FACTORY_ID)) return &kFactory;
     return nullptr;
 }
-
-} // namespace
-
-extern "C" CLAP_EXPORT const clap_plugin_entry_t clap_entry = {
-    .clap_version = CLAP_VERSION_INIT,
-    .init = entryInit,
-    .deinit = entryDeinit,
-    .get_factory = entryGetFactory,
-};

@@ -1,0 +1,15 @@
+Steinberg VST3 SDK 3.8.0 (https://github.com/steinbergmedia/vst3sdk, tag
+v3.8.0_build_66, commit 9fad9770f2ae8542ab1a548a68c1ad1ac690abe0) - only the
+parts clap-wrapper compiles:
+
+  base/               steinbergmedia/vst3_base           3d2e82f8e6bff59c1d8b7a27491a29c2286b5206
+  pluginterfaces/     steinbergmedia/vst3_pluginterfaces 31d6eeba6daaa3e2a8bfbe3e7a90ca0b7fbfbc1c
+  public.sdk/source/  steinbergmedia/vst3_public_sdk     a3911a4615dabbfdfd9d181ee26b05c70c289a95
+  CMakeLists.txt, LICENSE.txt, README.md (top level; clap-wrapper reads the
+  SDK version from CMakeLists.txt)
+
+Left out: the samples, VSTGUI, documentation, the validator and the cmake
+helpers (not used by clap-wrapper).
+
+License: MIT (see LICENSE.txt). "VST" is a trademark of Steinberg Media
+Technologies GmbH, see VST3_Usage_Guidelines in the upstream SDK.

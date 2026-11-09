@@ -128,14 +128,36 @@ static void host_clear(const clap_host_t* h, clap_id id, clap_param_clear_flags 
 static const clap_host_params_t g_host_params = {
     .rescan = host_rescan, .clear = host_clear, .request_flush = host_request_flush};
 
+/* clap.gui host side: records the plugin's resize requests (accepted). */
+static uint32_t g_resize_w, g_resize_h;
+static void host_gui_resize_hints_changed(const clap_host_t* h) { (void)h; }
+static bool host_gui_request_resize(const clap_host_t* h, uint32_t w, uint32_t hh) {
+    (void)h;
+    g_resize_w = w;
+    g_resize_h = hh;
+    return true;
+}
+static bool host_gui_request_show(const clap_host_t* h) { (void)h; return false; }
+static bool host_gui_request_hide(const clap_host_t* h) { (void)h; return false; }
+static void host_gui_closed(const clap_host_t* h, bool destroyed) { (void)h; (void)destroyed; }
+static const clap_host_gui_t g_host_gui = {
+    .resize_hints_changed = host_gui_resize_hints_changed,
+    .request_resize = host_gui_request_resize,
+    .request_show = host_gui_request_show,
+    .request_hide = host_gui_request_hide,
+    .closed = host_gui_closed};
+
 static const void* host_get_extension(const clap_host_t* h, const char* id) {
     (void)h;
     if (!strcmp(id, CLAP_EXT_PARAMS)) return &g_host_params;
+    if (!strcmp(id, CLAP_EXT_GUI)) return &g_host_gui;
     return NULL;
 }
 static void host_request_restart(const clap_host_t* h) { (void)h; }
 static void host_request_process(const clap_host_t* h) { (void)h; }
-static void host_request_callback(const clap_host_t* h) { (void)h; }
+/* set by request_callback; the test calls on_main_thread for it */
+static int g_callback_requested;
+static void host_request_callback(const clap_host_t* h) { (void)h; g_callback_requested = 1; }
 
 /* ---------------------------------------------------------- event lists */
 
@@ -330,6 +352,78 @@ static void build_state_params(MemStream* m, const char* sfPath, const uint32_t*
 
 /* Peak of |sample| over n blocks. */
 static float peak_blocks(const clap_plugin_t* plug, int n);
+
+/* Plays key 60 on patch 0 (reverb/chorus off) with the LFO knobs (params
+ * 8..10) set as given and copies the left channel of blocks
+ * [first, first + n) after the note-on into out. */
+static void lfo_note(const clap_plugin_t* plug, double amt, double spd, double del, int first,
+                     int n, float* out) {
+    InEvents in = {.count = 0};
+    add_param(&in, 0, 13, 0);
+    add_param(&in, 0, 18, 0);
+    add_param(&in, 0, 2, 0);
+    add_param(&in, 0, 8, amt);
+    add_param(&in, 0, 9, spd);
+    add_param(&in, 0, 10, del);
+    run_block(plug, &in, NULL);
+    in.count = 0;
+    add_midi(&in, 0, 0x90, 60, 100);
+    run_block(plug, &in, NULL);
+    for (int b = 1; b < first + n; ++b) {
+        run_block(plug, NULL, NULL);
+        if (b >= first) memcpy(out + (size_t)(b - first) * BLOCK, g_left, sizeof(g_left));
+    }
+    in.count = 0;
+    add_midi(&in, 0, 0x80, 60, 0);
+    add_midi(&in, 0, 0xB0, 120, 0); /* all sound off: no tail into the next note */
+    run_block(plug, &in, NULL);
+    run_blocks(plug, 20);
+}
+
+/* Sum of |a - b| and of |b| over n samples. */
+static void compare(const float* a, const float* b, int n, double* diff, double* mag) {
+    *diff = *mag = 0;
+    for (int i = 0; i < n; ++i) {
+        *diff += fabs(a[i] - b[i]);
+        *mag += fabs(b[i]);
+    }
+}
+
+/* Plays key 60 on patch 0 (reverb/chorus off) with the envelope override
+ * (params 3..7) set as given: returns the RMS of block probeBlock after the
+ * note-on, and of the releaseBlocks-th block after the note-off, sent
+ * holdBlocks blocks after the note-on. */
+static void env_note(const clap_plugin_t* plug, int enable, double a, double d, double s,
+                     double r, int probeBlock, int holdBlocks, int releaseBlocks,
+                     double* atProbe, double* afterRelease) {
+    InEvents in = {.count = 0};
+    add_param(&in, 0, 13, 0);
+    add_param(&in, 0, 18, 0);
+    add_param(&in, 0, 2, 0);
+    add_param(&in, 0, 3, enable);
+    add_param(&in, 0, 4, a);
+    add_param(&in, 0, 5, d);
+    add_param(&in, 0, 6, s);
+    add_param(&in, 0, 7, r);
+    run_block(plug, &in, NULL);
+    in.count = 0;
+    add_midi(&in, 0, 0x90, 60, 100);
+    double rms = run_block(plug, &in, NULL);
+    *atProbe = probeBlock == 0 ? rms : 0;
+    for (int b = 1; b < holdBlocks; ++b) {
+        rms = run_block(plug, NULL, NULL);
+        if (b == probeBlock) *atProbe = rms;
+    }
+    in.count = 0;
+    add_midi(&in, 0, 0x80, 60, 0);
+    run_block(plug, &in, NULL);
+    for (int b = 1; b <= releaseBlocks; ++b) rms = run_block(plug, NULL, NULL);
+    *afterRelease = rms;
+    in.count = 0;
+    add_midi(&in, 0, 0xB0, 120, 0); /* all sound off: no tail into the next note */
+    run_block(plug, &in, NULL);
+    run_blocks(plug, 20);
+}
 
 /* ------------------------------------------------------------------ main */
 
@@ -599,6 +693,98 @@ int main(int argc, char** argv) {
         run_blocks(plug, 300);
     }
 
+    /* 2e) envelope override replaces the preset's volume envelope with
+     * absolute values (attack/decay/release in seconds, sustain in dB) */
+    {
+        double probeOff, probeOn, relShort, relLong, susFull, susLow, unused;
+        env_note(plug, 0, 0.005, 1.0, 0.0, 0.3, 4, 10, 1, &probeOff, &unused);
+        env_note(plug, 1, 2.0, 1.0, 0.0, 0.3, 4, 10, 1, &probeOn, &unused);
+        CHECK(probeOff > 0.001 && probeOn < probeOff * 0.3,
+              "envelope override: 2 s attack (45 ms in: %.4f -> %.4f)", probeOff, probeOn);
+        env_note(plug, 1, 0.001, 1.0, 0.0, 0.001, 0, 20, 3, &unused, &relShort);
+        env_note(plug, 1, 0.001, 1.0, 0.0, 5.0, 0, 20, 3, &unused, &relLong);
+        CHECK(relLong > 0.001 && relShort < relLong * 0.01,
+              "envelope override: 1 ms vs 5 s release (30 ms after note-off: %.5f vs %.4f)",
+              relShort, relLong);
+        /* sustain level measured long after the 50 ms decay (and after any
+         * key-to-hold stretch the preset may add on top of hold 0) */
+        env_note(plug, 1, 0.001, 0.05, 0.0, 0.3, 600, 610, 1, &susFull, &unused);
+        env_note(plug, 1, 0.001, 0.05, -40.0, 0.3, 600, 610, 1, &susLow, &unused);
+        CHECK(susFull > 0.0001 && susLow < susFull * 0.05,
+              "envelope override: sustain -40 dB vs 0 dB (6.4 s in: %.4f -> %.5f)", susFull,
+              susLow);
+        /* hold (param 43, default 0 = none) delays the decay to -40 dB */
+        double holdLong, holdNone;
+        InEvents in = {.count = 0};
+        add_param(&in, 0, 43, 1.0);
+        run_block(plug, &in, NULL);
+        env_note(plug, 1, 0.001, 0.05, -40.0, 0.3, 47, 50, 1, &holdLong, &unused);
+        in.count = 0;
+        add_param(&in, 0, 43, 0.0);
+        run_block(plug, &in, NULL);
+        env_note(plug, 1, 0.001, 0.05, -40.0, 0.3, 47, 50, 1, &holdNone, &unused);
+        CHECK(holdLong > 0.001 && holdNone < holdLong * 0.05,
+              "envelope override: 1 s hold vs none (0.5 s in: %.4f vs %.5f)", holdLong, holdNone);
+        in.count = 0;
+        add_param(&in, 0, 3, 0);
+        add_param(&in, 0, 13, 1);
+        add_param(&in, 0, 18, 1);
+        run_block(plug, &in, NULL);
+    }
+
+    /* 2f) LFO: AMT > 0 replaces the preset's vibrato with the panel's
+     * depth/speed/delay. Two depths with the same 2 s delay must sound
+     * identical before the delay (no preset vibrato left either) and
+     * differ after it. */
+    {
+        enum { N = 10 };
+        static float a[BLOCK * N], b[BLOCK * N];
+        double diff, mag;
+        lfo_note(plug, 0, 5.0, 0.0, 30, N, a);
+        lfo_note(plug, 100, 5.0, 0.0, 30, N, b);
+        compare(a, b, BLOCK * N, &diff, &mag);
+        CHECK(mag > 0 && diff > mag * 0.05, "LFO AMT 100 ct adds vibrato (diff %.3g of %.3g)", diff,
+              mag);
+        lfo_note(plug, 50, 5.0, 2.0, 30, N, a);
+        lfo_note(plug, 150, 5.0, 2.0, 30, N, b);
+        compare(a, b, BLOCK * N, &diff, &mag);
+        CHECK(mag > 0 && diff < mag * 1e-4,
+              "LFO delay 2 s: no vibrato at 0.3 s, whatever the depth (diff %.3g of %.3g)", diff, mag);
+        lfo_note(plug, 50, 5.0, 2.0, 230, N, a);
+        lfo_note(plug, 150, 5.0, 2.0, 230, N, b);
+        compare(a, b, BLOCK * N, &diff, &mag);
+        CHECK(mag > 0 && diff > mag * 0.05,
+              "LFO delay 2 s: depth matters at 2.5 s (diff %.3g of %.3g)", diff, mag);
+        /* SPD turned while the note is held retunes its vibrato */
+        InEvents in = {.count = 0};
+        lfo_note(plug, 100, 5.0, 0.0, 30, N, a);
+        add_param(&in, 0, 13, 0);
+        add_param(&in, 0, 18, 0);
+        add_param(&in, 0, 9, 5.0);
+        run_block(plug, &in, NULL);
+        in.count = 0;
+        add_midi(&in, 0, 0x90, 60, 100);
+        run_block(plug, &in, NULL);
+        for (int blk = 1; blk < 30 + N; ++blk) {
+            in.count = 0;
+            if (blk == 10) add_param(&in, 0, 9, 12.0);
+            run_block(plug, &in, NULL);
+            if (blk >= 30) memcpy(b + (size_t)(blk - 30) * BLOCK, g_left, sizeof(g_left));
+        }
+        compare(a, b, BLOCK * N, &diff, &mag);
+        CHECK(mag > 0 && diff > mag * 0.05,
+              "LFO SPD changed on a held note retunes it (diff %.3g of %.3g)", diff, mag);
+        in.count = 0;
+        add_midi(&in, 0, 0x80, 60, 0);
+        add_midi(&in, 0, 0xB0, 120, 0);
+        add_param(&in, 0, 9, 5.0);
+        add_param(&in, 0, 8, 0);
+        add_param(&in, 0, 10, 0);
+        add_param(&in, 0, 13, 1);
+        add_param(&in, 0, 18, 1);
+        run_block(plug, &in, NULL);
+    }
+
     /* 3) MIDI Program Change in omni mode -> reported back to the host */
     {
         InEvents in = {.count = 0};
@@ -759,9 +945,55 @@ int main(int argc, char** argv) {
         CHECK(run_blocks(plug, 10) > 0.001, "plays after reloading state while active");
     }
 
+    /* 5b) UI Size (param 44): the editor size follows it - before the editor
+     * exists (get_size), and with it open a state load asks the host for the
+     * new size from the main thread (request_callback -> on_main_thread). */
+    {
+        const clap_plugin_gui_t* gui =
+            (const clap_plugin_gui_t*)plug->get_extension(plug, CLAP_EXT_GUI);
+        const uint32_t ids[1] = {44};
+        const double size75[1] = {1}, size100[1] = {0};
+        MemStream ms;
+        build_state_params(&ms, sfPath, ids, size75, 1);
+        clap_istream_t is = {.ctx = &ms, .read = mem_read};
+        state->load(plug, &is);
+        uint32_t w = 0, h = 0;
+        if (gui) gui->get_size(plug, &w, &h);
+        CHECK(w == 420 && h == 438, "UI Size 75%%: editor opens at %ux%u", w, h);
+#ifdef _WIN32
+        const int canShowGui = 1;
+#else
+        const int canShowGui = getenv("DISPLAY") != NULL;
+#endif
+        if (gui && canShowGui && gui->create(plug, GUI_API, false)) {
+            g_resize_w = g_resize_h = 0;
+            g_callback_requested = 0;
+            build_state_params(&ms, sfPath, ids, size100, 1);
+            clap_istream_t is2 = {.ctx = &ms, .read = mem_read};
+            state->load(plug, &is2);
+            if (g_callback_requested) plug->on_main_thread(plug);
+            gui->get_size(plug, &w, &h);
+            CHECK(g_resize_w == 560 && g_resize_h == 584 && w == 560 && h == 584,
+                  "UI Size back to 100%% with the editor open: host asked for %ux%u, editor %ux%u",
+                  g_resize_w, g_resize_h, w, h);
+            gui->destroy(plug);
+        } else {
+            printf("  info no display: open-editor resize not checked\n");
+        }
+        InEvents in = {.count = 0};
+        add_param(&in, 0, 44, 0);
+        run_block(plug, &in, NULL);
+    }
+
     if (wantGui) {
         const clap_plugin_gui_t* gui =
             (const clap_plugin_gui_t*)plug->get_extension(plug, CLAP_EXT_GUI);
+        /* MINI_HOST_UI_SIZE=0|1 opens the editor at 100/75% */
+        if (getenv("MINI_HOST_UI_SIZE")) {
+            InEvents in = {.count = 0};
+            add_param(&in, 0, 44, atoi(getenv("MINI_HOST_UI_SIZE")));
+            run_block(plug, &in, NULL);
+        }
         if (gui && gui->is_api_supported(plug, GUI_API, false) &&
             gui->create(plug, GUI_API, false)) {
             uint32_t w = 0, h = 0;

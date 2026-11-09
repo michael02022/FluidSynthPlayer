@@ -68,10 +68,9 @@ enum ParamId : uint32_t {
     kParamVoiceMode,
     kParamPortamento,
 
-    // REVERB/CHORUS panels' "preset override" switch + LEVEL knob: when
-    // on, LEVEL sets the send
-    // amount into the built-in effect for every voice instead of the
-    // amount the SoundFont preset asks for.
+    // REVERB/CHORUS panels' "Override Send" switch + LEVEL knob: when on,
+    // LEVEL is added to every voice's send amount into the built-in effect
+    // (on top of what the SoundFont preset and CC91/CC93 ask for).
     kParamReverbSendOverride,
     kParamReverbSend,
     kParamChorusSendOverride,
@@ -97,6 +96,13 @@ enum ParamId : uint32_t {
     // FluidSynthPlugin's "realtime;offline" interpolation pair: 0 = same as
     // kParamInterpolation, n = kInterpValues[n - 1].
     kParamRenderInterpolation,
+
+    // ENVELOPE panel's H fader (added after the others: ids never move).
+    kParamEnvHold,
+
+    // Editor size: 100% / 75% of the design size, for hosts without
+    // free plugin window resizing. Saved with the project, hidden from hosts.
+    kParamUiScale,
 
     kNumParams
 };
@@ -143,6 +149,9 @@ inline constexpr int kReverbEngineFdn = 1;
 inline constexpr const char* kPortaTimeModeNames[3] = {"Auto (7/14-bit)", "XG/GS (7-bit CC5)",
                                                        "Linear (14-bit CC5+37)"};
 inline constexpr const char* kMidiModeNames[2] = {"Omni (single patch)", "Multitimbral (GM)"};
+inline constexpr int kNumUiScales = 2;
+inline constexpr const char* kUiScaleNames[kNumUiScales] = {"100%", "75%"};
+inline constexpr double kUiScaleFactors[kNumUiScales] = {1.0, 0.75};
 inline constexpr const char* kVoiceModeNames[3] = {"Poly", "Mono", "Legato"};
 
 struct ParamInfo {
@@ -156,10 +165,12 @@ struct ParamInfo {
 
 // Ranges and units (see FluidEngine.cpp's applyParams for the generator
 // math behind each one):
-//  - Envelope times are a *multiplier* on the SoundFont's own value (FluidSynth
-//    generators set from the API are offsets added on top of the preset's
-//    values), shown as "x0.25", "x4.00"... 1.0 = untouched.
-//  - Sustain is a level shift in dB (+ = louder sustain, - = quieter).
+//  - Envelope (while its override switch is on) *replaces* the volume
+//    envelope of every new note: A/H/D/R absolute times in seconds (hold 0
+//    = none), S the sustain level in dB below full (0 dB = no decay). The
+//    preset keeps its own delay and modulation envelope.
+//  - LFO: at Amount 0 the preset's vibrato is untouched; above 0, amount
+//    (cents), speed (Hz) and delay (s) replace the preset's vibrato.
 //  - Cutoff is a shift in semitones; Resonance an added Q in dB.
 inline constexpr ParamInfo kParamInfos[kNumParams] = {
     {kParamGain, "Volume", "Main", 0.0, 2.0, 0.5, false, true},
@@ -167,10 +178,10 @@ inline constexpr ParamInfo kParamInfos[kNumParams] = {
     {kParamProgram, "Patch", "Main", 0.0, 127.0, 0.0, true, true},
 
     {kParamEnvEnable, "Envelope On", "Envelope", 0.0, 1.0, 0.0, true, true},
-    {kParamEnvAttack, "Attack", "Envelope", 1.0 / 16.0, 16.0, 1.0, false, true},
-    {kParamEnvDecay, "Decay", "Envelope", 1.0 / 16.0, 16.0, 1.0, false, true},
-    {kParamEnvSustain, "Sustain", "Envelope", -60.0, 60.0, 0.0, false, true},
-    {kParamEnvRelease, "Release", "Envelope", 1.0 / 16.0, 16.0, 1.0, false, true},
+    {kParamEnvAttack, "Attack", "Envelope", 0.001, 20.0, 0.005, false, true},
+    {kParamEnvDecay, "Decay", "Envelope", 0.001, 20.0, 1.0, false, true},
+    {kParamEnvSustain, "Sustain", "Envelope", -100.0, 0.0, 0.0, false, true},
+    {kParamEnvRelease, "Release", "Envelope", 0.001, 20.0, 0.3, false, true},
 
     {kParamLfoAmount, "LFO Amount", "LFO", 0.0, 200.0, 0.0, false, true},
     {kParamLfoSpeed, "LFO Speed", "LFO", 0.1, 20.0, 5.0, false, true},
@@ -216,6 +227,8 @@ inline constexpr ParamInfo kParamInfos[kNumParams] = {
     // default: 25th-order sinc, upstream FluidSynthPlugin's default ("4;7")
     {kParamRenderInterpolation, "Render Interpolation", "Settings", 0.0, double(kNumInterpModes),
      double(kNumInterpModes), true, false},
+    {kParamEnvHold, "Hold", "Envelope", 0.0, 20.0, 0.0, false, true},
+    {kParamUiScale, "UI Size", "Settings", 0.0, double(kNumUiScales - 1), 0.0, true, false},
 };
 
 // Standard SF2 default modulators (SF2.01 section 8.4) a SoundFont can
@@ -357,6 +370,9 @@ struct SharedParams {
         // applied when the host restores a saved state (see plugin.cpp's
         // maybeLoadDefaultSoundFont).
         std::string defaultSoundFont;
+        // UI Size (kParamUiScale index) a brand-new instance opens with: the
+        // last one chosen in any instance.
+        int uiScale = 0;
 
         // Toast message (errors and notices) with its timestamp, auto-
         // dismissed by editor_ui.cpp's drawToast.

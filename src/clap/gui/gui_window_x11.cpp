@@ -285,6 +285,10 @@ void GuiWindow::setSize(uint32_t w, uint32_t h) {
     pendingW_ = w;
     pendingH_ = h;
     hasPendingSize_ = true;
+    // The GUI thread applies it; get_size right after set_size must already
+    // report the new size.
+    width_.store(w);
+    height_.store(h);
 }
 
 void GuiWindow::threadMain() {

@@ -1,7 +1,8 @@
 #!/bin/sh
-# Packs a Linux build of the CLAP plugin into a distribution zip:
+# Packs a Linux build of the plugin into a distribution zip:
 #   dist/FluidSynthPlayer-<version>-linux-<arch>.zip
-#     FluidSynthPlayer.clap, README.txt, LICENSE.txt, licenses/...
+#     FluidSynthPlayer.clap, FluidSynthPlayer.vst3/ (if built), README.txt,
+#     LICENSE.txt, licenses/...
 #
 # Build first (see README.md, "Linux"), then from the repository root:
 #   sh scripts/package-linux.sh [build-dir] [out-dir]
@@ -17,6 +18,12 @@ OUT_DIR=${2:-dist}
 clap=$BUILD_DIR/FluidSynthPlayer.clap
 [ -f "$clap" ] || { echo "error: $clap not found - build it first." >&2; exit 1; }
 command -v zip >/dev/null || { echo "error: zip is not installed." >&2; exit 1; }
+# The VST3 bundle (FSP_BUILD_VST3, on by default), wherever the generator put it.
+vst3=
+for d in "$BUILD_DIR/Release/FluidSynthPlayer.vst3" "$BUILD_DIR/FluidSynthPlayer.vst3"; do
+    [ -d "$d" ] && { vst3=$d; break; }
+done
+[ -n "$vst3" ] || echo "warning: no FluidSynthPlayer.vst3 in $BUILD_DIR: packaging the CLAP only." >&2
 
 version=$(sed -n 's/^project(FluidSynthPlayer VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
 commit=$(git rev-parse --short HEAD)
@@ -41,6 +48,11 @@ pkg=$stage/$name
 
 # ---- plugin (debug info stripped) ----
 strip --strip-unneeded -o "$pkg/FluidSynthPlayer.clap" "$clap"
+if [ -n "$vst3" ]; then
+    so=Contents/$arch-linux/FluidSynthPlayer.so
+    mkdir -p "$pkg/FluidSynthPlayer.vst3/Contents/$arch-linux"
+    strip --strip-unneeded -o "$pkg/FluidSynthPlayer.vst3/$so" "$vst3/$so"
+fi
 
 # ---- licenses ----
 cp LICENSE.txt "$pkg/LICENSE.txt"
@@ -57,6 +69,8 @@ CLAP-MIT.txt external/clap/LICENSE
 DearImGui-MIT.txt external/imgui/LICENSE.txt
 FontAwesome-OFL-1.1.txt external/fontawesome/LICENSE-OFL.txt
 Roboto-Apache-2.0.txt external/roboto/LICENSE.txt
+clap-wrapper-MIT.txt external/clap-wrapper/LICENSE
+VST3-SDK-MIT.txt external/vst3sdk/LICENSE.txt
 EOF
 
 # ---- README.txt ----
@@ -72,8 +86,8 @@ else
 fi
 
 cat > "$pkg/README.txt" <<EOF
-FluidSynth Player $version - CLAP plugin for Linux ($arch)
-=========================================================
+FluidSynth Player $version - CLAP / VST3 plugin for Linux ($arch)
+================================================================
 
 SoundFont player instrument based on FluidSynth 2.6 (statically linked),
 with an ImGui interface. $formats
@@ -84,7 +98,8 @@ commit $commit$dirty.
 Requirements
 ------------
 - $arch Linux with glibc $glibc or newer
-- A DAW / host with CLAP support (e.g. REAPER, Bitwig Studio, Ardour)
+- A DAW / host with CLAP or VST3 support (e.g. REAPER, Bitwig Studio,
+  Ardour)
 - X11 or XWayland, with OpenGL
 $sndfile_req
 - Optional: zenity, for the folder button's file dialog (drag & drop
@@ -92,14 +107,15 @@ $sndfile_req
 
 Installation
 ------------
-Copy FluidSynthPlayer.clap into one of the standard CLAP folders, then let
-the DAW rescan its plugins:
+Copy FluidSynthPlayer.clap into one of the standard CLAP folders, and/or
+the FluidSynthPlayer.vst3 folder into one of the VST3 folders, then let the
+DAW rescan its plugins (use one format per DAW; both are the same plugin):
 
   Current user only:
-    ~/.clap/
+    ~/.clap/            ~/.vst3/
 
   All users (needs root):
-    /usr/lib/clap/
+    /usr/lib/clap/      /usr/lib/vst3/
 
 Usage notes
 -----------
@@ -116,7 +132,9 @@ FluidSynth Player is MIT licensed (LICENSE.txt). It contains third-party
 components under their own licenses (see the licenses folder):
   FluidSynth (LGPL 2.1), gcem (Apache 2.0), Signalsmith libraries (MIT,
   0BSD), CLAP (MIT), Dear ImGui (MIT), Font Awesome 4 font (SIL OFL 1.1),
-  Roboto font (Apache 2.0).
+  Roboto font (Apache 2.0); the VST3 also clap-wrapper (MIT) and the
+  Steinberg VST3 SDK (MIT). VST is a trademark of Steinberg Media
+  Technologies GmbH.
 
 FluidSynth is linked statically. As required by the LGPL, the complete
 source code - including FluidSynth (external/fluidsynth) and the build
@@ -129,8 +147,9 @@ EOF
 find "$pkg" -type d -exec chmod 755 {} +
 find "$pkg" -type f -exec chmod 644 {} +
 chmod 755 "$pkg/FluidSynthPlayer.clap"
+[ -z "$vst3" ] || chmod 755 "$pkg/FluidSynthPlayer.vst3/$so"
 mkdir -p "$OUT_DIR"
 zip_path=$(cd "$OUT_DIR" && pwd)/$name.zip
 rm -f "$zip_path"
 (cd "$stage" && zip -qr -X "$zip_path" "$name")
-echo "Created $OUT_DIR/$name.zip (SF3 support: $has_sf3, glibc >= $glibc)"
+echo "Created $OUT_DIR/$name.zip (SF3 support: $has_sf3, VST3: $([ -n "$vst3" ] && echo yes || echo no), glibc >= $glibc)"

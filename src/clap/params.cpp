@@ -34,12 +34,15 @@ std::string formatParamValue(ParamId id, double value) {
         case kParamReceivePC:
             return iv ? "On" : "Off";
         case kParamEnvAttack:
+        case kParamEnvHold:
         case kParamEnvDecay:
         case kParamEnvRelease:
-            snprintf(buf, sizeof(buf), "x%.2f", value);
+            if (value < 0.01) snprintf(buf, sizeof(buf), "%.1f ms", value * 1000.0);
+            else if (value < 1.0) snprintf(buf, sizeof(buf), "%.0f ms", value * 1000.0);
+            else snprintf(buf, sizeof(buf), "%.2f s", value);
             break;
         case kParamEnvSustain:
-            snprintf(buf, sizeof(buf), "%+.1f dB", value);
+            snprintf(buf, sizeof(buf), "%.1f dB", value);
             break;
         case kParamLfoAmount:
             snprintf(buf, sizeof(buf), "%.0f ct", value);
@@ -96,6 +99,8 @@ std::string formatParamValue(ParamId id, double value) {
             return kReverbEngineNames[iv < 0 ? 0 : iv >= kNumReverbEngines ? kNumReverbEngines - 1 : iv];
         case kParamPortamentoTimeMode:
             return kPortaTimeModeNames[iv < 0 ? 0 : iv > 2 ? 2 : iv];
+        case kParamUiScale:
+            return kUiScaleNames[iv < 0 ? 0 : iv >= kNumUiScales ? kNumUiScales - 1 : iv];
         case kParamLimiterCeiling:
             snprintf(buf, sizeof(buf), "%.1f dB", value);
             break;

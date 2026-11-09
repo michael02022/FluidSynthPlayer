@@ -53,17 +53,25 @@ single compact panel (560x584, scales when resized):
   wheel); clicking it opens the patch selector, a searchable list grouped
   by bank. `(none)` when the SoundFont lacks the patch, `(DrumKit)` for
   bank 128.
-- **REVERB / CHORUS**: *BUILT-IN* switch, *preset override* switch and send
+- **REVERB / CHORUS**: *ENABLE* switch, *Override Send* switch and send
   *LEVEL* knob; *SETUP* holds the effect unit parameters (reverb engine,
   room, damping, width / chorus voices, speed, depth).
-- **ENVELOPE** (A/D/S/R faders scaling the preset's own envelope, with an
-  override switch), **LFO** (DEL/AMT/SPD vibrato), **MISC** (filter
-  CUT/RES).
+- **ENVELOPE**: with its override switch on, the A/H/D/S/R faders replace
+  the volume envelope of every new note (attack, decay and release times
+  from 1 ms to 20 s, hold from 0 to 20 s, sustain level in dB); the preset
+  keeps its own delay and modulation envelope.
+- **LFO** (vibrato): with *AMT* at 0 each preset keeps its own vibrato;
+  above 0, *AMT* (depth), *SPD* (speed) and *DEL* (delay) replace it.
+- **MISC**: filter *CUT* (cutoff shift) and *RES* (added resonance) on top
+  of the preset's own filter.
 - **Options** (gear): volume, MIDI mode *Omni* / *Multitimbral (GM)* with a
   16-channel table, program change reception, bend range, transpose, fine
   tune, Poly/Mono/Legato, portamento, polyphony, interpolation, the raw
   FluidSynth settings of the original plugin, SoundFont info and the
   FluidSynth log.
+- **UI size** (Options > General): 100% or 75% of the panel, for DAWs that
+  can't resize plugin windows (the plugin asks the host for the new size);
+  saved with the project, and new instances open at the last size chosen.
 - Every control is a CLAP parameter (automation, gestures, text entry);
   MIDI events are placed sample-accurately as in the original plugin.
 - **Restore MIDI controllers** (Options): some SoundFonts - e.g. converted
@@ -102,6 +110,16 @@ libsndfile is only needed for SF3 (Ogg/Vorbis compressed) SoundFonts: when
 CMake doesn't find it, the plugin is built without SF3 support (with a
 warning; SF2 and DLS keep working, Options > Info shows it).
 
+**VST3**: the same build also produces `FluidSynthPlayer.vst3` from the very
+same code through [clap-wrapper](https://github.com/free-audio/clap-wrapper)
+(`external/clap-wrapper`) and the Steinberg VST3 SDK (`external/vst3sdk`,
+only the parts clap-wrapper compiles) - nothing is downloaded. clap-wrapper
+carries a local patch, `patches/clap-wrapper/`, that makes multitimbral
+MIDI exact in VST3: without it, many controller and program change values
+arrive one too low (program 40 as 39), and REAPER's program changes would
+precede the bank select sent with them. The VST3 lands in `<build>/Release/` (or the
+build directory); turn it off with `-DFSP_BUILD_VST3=OFF`.
+
 ### Linux
 
 Needs CMake >= 3.24, `libsndfile1-dev`, X11/OpenGL headers; `zenity` at
@@ -111,6 +129,7 @@ runtime for the *Open...* dialog:
 cmake -B build-clap
 cmake --build build-clap -j$(nproc)
 cp build-clap/FluidSynthPlayer.clap ~/.clap/
+cp -r build-clap/Release/FluidSynthPlayer.vst3 ~/.vst3/   # VST3, optional
 ```
 
 Distribution zip (`dist/FluidSynthPlayer-<version>-linux-<arch>.zip`, with a

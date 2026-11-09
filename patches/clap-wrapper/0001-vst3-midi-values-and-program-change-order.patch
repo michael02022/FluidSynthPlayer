@@ -1,0 +1,133 @@
+From: FluidSynthPlayer
+Subject: [PATCH] VST3: exact MIDI controller values, program change after bank select
+
+Two fixes to the VST3 wrapper's MIDI-to-CLAP translation (IMidiMapping
+parameters -> CLAP_EVENT_MIDI), found while checking multitimbral playback
+and Program Change of FluidSynthPlayer in REAPER:
+
+1. Values were truncated: asClapValue() is value * stepCount, and a host's
+   normalized 40/127 comes back as 39.999..., which the integer cast turned
+   into 39. Program changes, bank selects and every CC arrived one too low
+   for many values. Round instead.
+
+2. Event order. Notes are queued before the parameter-derived MIDI events,
+   so at the same timestamp a note started with the previous program; and
+   REAPER delivers the kIsProgramChange parameter at offset 0 of the block
+   while the bank select CCs of the same channel keep their real offset, so
+   the program change was applied with the previous bank. Same-time events
+   are now ordered CC < program change / other channel messages / parameter
+   values < notes, and a program change is moved after a later bank select
+   (CC0/CC32) of the same channel in the same block.
+
+Applies to free-audio/clap-wrapper 806bba0a5f792e3966b99c1561ab9952d3316d7c.
+
+diff --git a/src/detail/vst3/process.cpp b/src/detail/vst3/process.cpp
+index 8942d35..0d42648 100644
+--- a/src/detail/vst3/process.cpp
++++ b/src/detail/vst3/process.cpp
+@@ -328,16 +328,20 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
+             n.param.header.size = sizeof(clap_event_midi_t);
+             n.midi.port_index = 0;
+ 
++            // asClapValue is value * stepCount: a host's normalized 40/127
++            // comes back as 39.999..., so round instead of truncating.
++            const auto ival = static_cast<uint16_t>(std::lround(param->asClapValue(value)));
++
+             switch (param->controller)
+             {
+               case Vst::ControllerNumbers::kAfterTouch:
+                 n.midi.data[0] = 0xD0 | param->channel;
+-                n.midi.data[1] = param->asClapValue(value);
++                n.midi.data[1] = static_cast<uint8_t>(ival);
+                 n.midi.data[2] = 0;
+                 break;
+               case Vst::ControllerNumbers::kPitchBend:
+               {
+-                auto val = (uint16_t)param->asClapValue(value);
++                auto val = ival;
+                 n.midi.data[0] = 0xE0 | param->channel;  // $Ec
+                 n.midi.data[1] = (val & 0x7F);           // LSB
+                 n.midi.data[2] = (val >> 7) & 0x7F;      // MSB
+@@ -345,7 +349,7 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
+               break;
+               case Vst::ControllerNumbers::kCtrlProgramChange:
+               {
+-                auto val = (uint16_t)param->asClapValue(value);
++                auto val = ival;
+                 n.midi.data[0] = 0xC0 | param->channel;  // $Cc
+                 n.midi.data[1] = (val & 0x7F);           // only one byte
+                 n.midi.data[2] = 0;
+@@ -354,7 +358,7 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
+               default:
+                 n.midi.data[0] = 0xB0 | param->channel;
+                 n.midi.data[1] = param->controller;
+-                n.midi.data[2] = param->asClapValue(value);
++                n.midi.data[2] = static_cast<uint8_t>(ival);
+                 break;
+             }
+ 
+@@ -394,6 +398,22 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
+     }
+   }
+ 
++  // Some hosts (REAPER) deliver a kIsProgramChange parameter at offset 0 of
++  // the block, while the bank select CCs of the same channel arrive at
++  // their real offset - the program change would then be applied with the
++  // previous bank. A program change belongs after the bank select that
++  // precedes it, so move it there.
++  for (auto &pc : _events)
++  {
++    if (pc.header.type != CLAP_EVENT_MIDI || (pc.midi.data[0] & 0xF0) != 0xC0) continue;
++    for (const auto &cc : _events)
++    {
++      if (cc.header.type == CLAP_EVENT_MIDI && cc.midi.data[0] == (0xB0 | (pc.midi.data[0] & 0x0F)) &&
++          (cc.midi.data[1] == 0 || cc.midi.data[1] == 32) && cc.header.time > pc.header.time)
++        pc.header.time = cc.header.time;
++    }
++  }
++
+   sortEventIndices();
+ 
+   bool doProcess = true;
+@@ -495,15 +515,32 @@ void ProcessAdapter::sortEventIndices()
+   // an item must be sorted to front of
+   // if the timestamp if event[a] is earlier than
+   // the timestamp of event[b].
+-  // if they have the same timestamp, the index must be preserved
+-
+-  std::sort(_eventindices.begin(), _eventindices.end(),
+-            [&](size_t const &a, size_t const &b)
+-            {
+-              auto t1 = _events[a].header.time;
+-              auto t2 = _events[b].header.time;
+-              return (t1 == t2) ? (a < b) : (t1 < t2);
+-            });
++  // if they have the same timestamp, MIDI semantics come first: controllers
++  // (bank select) before program changes, both - and the other channel
++  // messages and parameter values - before notes; otherwise the index
++  // must be preserved. Notes are queued before the parameter-derived
++  // events, so without this a note would start with the previous program.
++  auto rank = [&](size_t i)
++  {
++    const auto &e = _events[i];
++    if (e.header.space_id != CLAP_CORE_EVENT_SPACE_ID) return 2;
++    if (e.header.type == CLAP_EVENT_PARAM_VALUE) return 1;
++    if (e.header.type == CLAP_EVENT_MIDI)
++    {
++      const auto status = e.midi.data[0] & 0xF0;
++      if (status == 0xB0) return 0;
++      if (status == 0xC0 || status == 0xD0 || status == 0xE0) return 1;
++    }
++    return 2;
++  };
++  std::stable_sort(_eventindices.begin(), _eventindices.end(),
++                   [&](size_t const &a, size_t const &b)
++                   {
++                     auto t1 = _events[a].header.time;
++                     auto t2 = _events[b].header.time;
++                     if (t1 != t2) return t1 < t2;
++                     return rank(a) < rank(b);
++                   });
+ }
+ 
+ void ProcessAdapter::processInputEvents(Steinberg::Vst::IEventList *eventlist)
