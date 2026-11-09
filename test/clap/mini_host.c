@@ -380,6 +380,40 @@ static void lfo_note(const clap_plugin_t* plug, double amt, double spd, double d
     run_blocks(plug, 20);
 }
 
+/* Plays key 60 on patch `prog` with the given REVERB / CHORUS settings (params
+ * 13 ENABLE, 32 Override Send, 33 LEVEL; 18, 34, 35 for the chorus) and
+ * copies the left channel of the first n blocks - the note is released at
+ * block 20, so the effect tail is included. At levelAt, LEVEL (both
+ * effects) changes to level2 while the note sounds. */
+static void fx_note(const clap_plugin_t* plug, int prog, int revOn, int revOvr, double revLvl,
+                    int choOn, int choOvr, double choLvl, int levelAt, double level2, int n,
+                    float* out) {
+    InEvents in = {.count = 0};
+    add_param(&in, 0, 2, prog);
+    add_param(&in, 0, 13, revOn);
+    add_param(&in, 0, 32, revOvr);
+    add_param(&in, 0, 33, revLvl);
+    add_param(&in, 0, 18, choOn);
+    add_param(&in, 0, 34, choOvr);
+    add_param(&in, 0, 35, choLvl);
+    run_block(plug, &in, NULL);
+    run_blocks(plug, 300); /* let any earlier effect tail die out */
+    for (int b = 0; b < n; ++b) {
+        in.count = 0;
+        if (b == 0) add_midi(&in, 0, 0x90, 60, 100);
+        if (b == 20) add_midi(&in, 0, 0x80, 60, 0);
+        if (b == levelAt) {
+            add_param(&in, 0, 33, level2);
+            add_param(&in, 0, 35, level2);
+        }
+        run_block(plug, &in, NULL);
+        memcpy(out + (size_t)b * BLOCK, g_left, sizeof(g_left));
+    }
+    in.count = 0;
+    add_midi(&in, 0, 0xB0, 120, 0);
+    run_block(plug, &in, NULL);
+}
+
 /* Sum of |a - b| and of |b| over n samples. */
 static void compare(const float* a, const float* b, int n, double* diff, double* mag) {
     *diff = *mag = 0;
@@ -782,6 +816,49 @@ int main(int argc, char** argv) {
         add_param(&in, 0, 10, 0);
         add_param(&in, 0, 13, 1);
         add_param(&in, 0, 18, 1);
+        run_block(plug, &in, NULL);
+    }
+
+    /* 2g) Override Send replaces each note's send with LEVEL: LEVEL 0 sounds
+     * exactly like the effect switched off, whatever the preset's own send
+     * and CC91/CC93 ask for; LEVEL turned on a held note too. Patch 0 and
+     * GM 104 (Sitar), which set their own sends in e.g. FluidR3 (piano 10%
+     * reverb; sitar 13% reverb, 10% chorus). FluidSynth starts CC91/CC93 at
+     * 0, so a preset without its own send has no effect to remove. */
+    for (int prog = 0; prog <= 104; prog += 104) {
+        enum { N = 120 };
+        static float off[BLOCK * N], ovr0[BLOCK * N], dflt[BLOCK * N], live[BLOCK * N];
+        double diff, mag;
+        fx_note(plug, prog, 0, 0, 0.0, 0, 0, 0.0, -1, 0, N, off);
+        compare(off, off, BLOCK * N, &diff, &mag);
+        if (mag == 0) {
+            printf("  info patch %d is silent in this SoundFont: send override not checked\n", prog);
+            continue;
+        }
+        fx_note(plug, prog, 1, 1, 0.0, 1, 1, 0.0, -1, 0, N, ovr0);
+        compare(ovr0, off, BLOCK * N, &diff, &mag);
+        CHECK(diff < mag * 1e-3,
+              "patch %d, Override Send LEVEL 0: no reverb/chorus at all (diff %.3g of %.3g)", prog,
+              diff, mag);
+        fx_note(plug, prog, 1, 0, 0.0, 1, 0, 0.0, -1, 0, N, dflt);
+        compare(dflt, off, BLOCK * N, &diff, &mag);
+        if (diff > mag * 0.01)
+            printf("  ok   patch %d, Override Send off: the preset's own send reaches the effects "
+                   "(diff %.3g of %.3g)\n", prog, diff, mag);
+        else
+            printf("  info patch %d has no effect send of its own in this SoundFont\n", prog);
+        fx_note(plug, prog, 1, 1, 0.0, 1, 1, 0.0, 10, 1.0, N, live);
+        compare(live, ovr0, BLOCK * N, &diff, &mag);
+        CHECK(diff > mag * 0.01,
+              "patch %d, Override Send: LEVEL raised on a held note sends it (diff %.3g of %.3g)",
+              prog, diff, mag);
+    }
+    {
+        InEvents in = {.count = 0};
+        add_param(&in, 0, 13, 1);
+        add_param(&in, 0, 18, 1);
+        add_param(&in, 0, 32, 0);
+        add_param(&in, 0, 34, 0);
         run_block(plug, &in, NULL);
     }
 

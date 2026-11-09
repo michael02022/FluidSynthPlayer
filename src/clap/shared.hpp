@@ -69,8 +69,8 @@ enum ParamId : uint32_t {
     kParamPortamento,
 
     // REVERB/CHORUS panels' "Override Send" switch + LEVEL knob: when on,
-    // LEVEL is added to every voice's send amount into the built-in effect
-    // (on top of what the SoundFont preset and CC91/CC93 ask for).
+    // every voice's send into the built-in effect is exactly LEVEL - in
+    // place of the SoundFont preset's own send and of CC91/CC93.
     kParamReverbSendOverride,
     kParamReverbSend,
     kParamChorusSendOverride,

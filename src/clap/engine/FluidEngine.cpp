@@ -118,6 +118,50 @@ const std::array<fluid_mod_t*, kNumStandardControllers>& standardModulators() {
     return mods;
 }
 
+// REVERB / CHORUS "Override Send": the send of every voice becomes exactly
+// LEVEL - the preset's own send is replaced (fluid_voice_gen_set) and the
+// CC91/CC93 default modulator is muted on the voice (overwritten with a
+// zero-amount copy), so LEVEL 0 really means no send.
+struct SendOverride {
+    bool on;
+    int gen;           // GEN_REVERBSEND / GEN_CHORUSSEND
+    float value;       // 0.1% units
+    int cc;            // 91 / 93
+    fluid_mod_t* mute; // zero-amount copy of the CC -> send default modulator
+};
+
+std::array<SendOverride, 2> sendOverrides(const SharedParams& params) {
+    static std::array<fluid_mod_t*, 2> mutes{};
+    static std::once_flag once;
+    std::call_once(once, [] {
+        const auto& mods = standardModulators();
+        for (int i = 0; i < 2; ++i) {
+            mutes[i] = new_fluid_mod();
+            fluid_mod_clone(mutes[i], mods[i == 0 ? 4 : 5]); // CC91 / CC93 -> send
+            fluid_mod_set_amount(mutes[i], 0.0);
+        }
+    });
+    auto make = [&](ParamId sw, ParamId level, int gen, int cc, fluid_mod_t* mute) {
+        return SendOverride{std::lround(params.values[sw].load()) != 0, gen,
+                            static_cast<float>(params.values[level].load() * 1000.0), cc, mute};
+    };
+    return {{make(kParamReverbSendOverride, kParamReverbSend, GEN_REVERBSEND, 91, mutes[0]),
+             make(kParamChorusSendOverride, kParamChorusSend, GEN_CHORUSSEND, 93, mutes[1])}};
+}
+
+void applySendOverride(fluid_voice_t* v, const SendOverride& so) {
+    fluid_voice_add_mod(v, so.mute, FLUID_VOICE_OVERWRITE);
+    fluid_voice_gen_set(v, so.gen, so.value);
+}
+
+// The voice's modulator sums were computed at note-on: re-sending the
+// channel's current CC recomputes them (without the muted modulator) and
+// updates the send - same trick as "Restore MIDI controllers" below.
+void resendCc(fluid_synth_t* s, int ch, int cc) {
+    int val = 0;
+    if (fluid_synth_get_cc(s, ch, cc, &val) == FLUID_OK) fluid_synth_cc(s, ch, cc, val);
+}
+
 // Patches the voices the last note-on just started on `ch` (they haven't
 // rendered yet). Runs on every note-on, so lastPatchedVoiceId always tracks
 // the newest voice and switching an option on never touches notes that are
@@ -145,6 +189,7 @@ void patchNewVoices(FluidInstance& inst, const SharedParams& params, int ch, int
     const bool envelope = std::lround(params.values[kParamEnvEnable].load()) != 0;
     const bool vibrato = params.values[kParamLfoAmount].load() > 0.0;
     const std::array<GenValue, 3> vibGens = vibratoGens(params);
+    const std::array<SendOverride, 2> sends = sendOverrides(params);
     std::array<GenValue, 5> envGens{};
     const double hold = params.values[kParamEnvHold].load();
     if (envelope)
@@ -181,6 +226,8 @@ void patchNewVoices(FluidInstance& inst, const SharedParams& params, int ch, int
             for (int b = 0; b < kNumStandardControllers; ++b)
                 if (inst.disabledControllers & (1u << b))
                     fluid_voice_add_mod(v, mods[b], FLUID_VOICE_OVERWRITE);
+        for (const SendOverride& so : sends) // after restore: the override wins
+            if (so.on) applySendOverride(v, so);
     }
     if (newest == inst.lastPatchedVoiceId) return; // nothing new was started
     inst.lastPatchedVoiceId = newest;
@@ -190,6 +237,8 @@ void patchNewVoices(FluidInstance& inst, const SharedParams& params, int ch, int
     // already be over when the new envelope arrives. (The CC re-sends
     // below are such calls too.)
     if (envelope || vibrato) fluid_synth_get_active_voice_count(inst.synth);
+    for (const SendOverride& so : sends)
+        if (so.on) resendCc(inst.synth, ch, so.cc);
     if (!restore) return;
 
     static const int kCcOfBit[kNumStandardControllers] = {1, 7, 10, 11, 91, 93, -1, -1};
@@ -498,17 +547,23 @@ void applyParams(FluidInstance& inst, SharedParams& params) {
         }
     }
 
+    // Override Send: new notes get it in patchNewVoices; turning LEVEL (or
+    // the switch on) also sets it on the notes already sounding.
     if (any({kParamReverbSendOverride, kParamReverbSend, kParamChorusSendOverride,
-             kParamChorusSend})) {
-        // Send generators are in 0.1% units; the API value is added on top
-        // of the preset's own (usually 0), so "override" = this amount.
-        const float rev = asInt(kParamReverbSendOverride)
-                              ? static_cast<float>(v[kParamReverbSend] * 1000.0) : 0.f;
-        const float cho = asInt(kParamChorusSendOverride)
-                              ? static_cast<float>(v[kParamChorusSend] * 1000.0) : 0.f;
-        for (int c = 0; c < kNumMidiChannels; ++c) {
-            fluid_synth_set_gen(s, c, GEN_REVERBSEND, rev);
-            fluid_synth_set_gen(s, c, GEN_CHORUSSEND, cho);
+             kParamChorusSend}) &&
+        !inst.voiceBuf.empty()) {
+        const std::array<SendOverride, 2> sends = sendOverrides(params);
+        if (sends[0].on || sends[1].on) {
+            fluid_synth_get_voicelist(s, inst.voiceBuf.data(),
+                                      static_cast<int>(inst.voiceBuf.size()), -1);
+            for (fluid_voice_t* voice : inst.voiceBuf) {
+                if (!voice) break;
+                for (const SendOverride& so : sends)
+                    if (so.on) applySendOverride(voice, so);
+            }
+            for (int c = 0; c < kNumMidiChannels; ++c)
+                for (const SendOverride& so : sends)
+                    if (so.on) resendCc(s, c, so.cc);
         }
     }
 

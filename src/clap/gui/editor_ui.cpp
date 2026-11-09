@@ -1108,8 +1108,8 @@ void drawFxPanel(SharedParams& params, const EditorCallbacks& cb, const Layout& 
         }
         ImGui::Spacing();
         ImGui::PushStyleColor(ImGuiCol_Text, kDimText);
-        ImGui::TextUnformatted("LEVEL + override switch: send amount for every\n"
-                               "preset (switch off = each preset's own amount).");
+        ImGui::TextUnformatted("Override Send on: every note's send is LEVEL,\n"
+                               "replacing the preset's own and CC91/CC93.");
         ImGui::PopStyleColor();
         ImGui::EndPopup();
     }

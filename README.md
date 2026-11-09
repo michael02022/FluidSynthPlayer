@@ -54,8 +54,10 @@ single compact panel (560x584, scales when resized):
   by bank. `(none)` when the SoundFont lacks the patch, `(DrumKit)` for
   bank 128.
 - **REVERB / CHORUS**: *ENABLE* switch, *Override Send* switch and send
-  *LEVEL* knob; *SETUP* holds the effect unit parameters (reverb engine,
-  room, damping, width / chorus voices, speed, depth).
+  *LEVEL* knob - with the switch on, every note's send is exactly LEVEL,
+  replacing the preset's own send and CC91/CC93 (LEVEL 0 = no effect);
+  *SETUP* holds the effect unit parameters (reverb engine, room, damping,
+  width / chorus voices, speed, depth).
 - **ENVELOPE**: with its override switch on, the A/H/D/S/R faders replace
   the volume envelope of every new note (attack, decay and release times
   from 1 ms to 20 s, hold from 0 to 20 s, sustain level in dB); the preset
