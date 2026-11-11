@@ -27,6 +27,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -71,7 +72,7 @@ struct Plugin {
     const clap_host_params_t* hostParams = nullptr;
     const clap_host_gui_t* hostGui = nullptr;
     std::unique_ptr<GuiWindow> window;
-    // UI Size changed: ask the host for the new window size (main thread).
+    // Editor scale changed: ask the host for the new window size (main thread).
     std::atomic<bool> uiResizePending{false};
     SharedParams params;
     EditorUIState uiState;
@@ -130,11 +131,15 @@ void requestParamFlush(Plugin* p) {
     if (p->hostParams && p->hostParams->request_flush) p->hostParams->request_flush(p->host);
 }
 
-// Editor window size for the UI Size param (100/75% of the design size).
+// Editor window size for a scale (1 = the design size), aspect kept.
+void scaledSize(double scale, uint32_t& w, uint32_t& h) {
+    scale = std::clamp(scale, kUiScaleMin, kUiScaleMax);
+    w = static_cast<uint32_t>(std::lround(kDefaultW * scale));
+    h = static_cast<uint32_t>(std::lround(kDefaultH * scale));
+}
+
 void uiScaledSize(const Plugin* p, uint32_t& w, uint32_t& h) {
-    const double f = kUiScaleFactors[std::clamp(p->params.getInt(kParamUiScale), 0, kNumUiScales - 1)];
-    w = static_cast<uint32_t>(std::lround(kDefaultW * f));
-    h = static_cast<uint32_t>(std::lround(kDefaultH * f));
+    scaledSize(p->params.values[kParamUiScale].load(), w, h);
 }
 
 // The resize request itself goes out from the main thread (plugOnMainThread):
@@ -154,14 +159,23 @@ void setParamFromUi(Plugin* p, ParamId id, double value) {
     p->params.values[id].store(value);
     p->params.guiValueDirty[id].store(true);
     requestParamFlush(p);
-    if (id == kParamUiScale) {
-        {
-            std::lock_guard<std::mutex> lock(p->params.guiState.mutex);
-            p->params.guiState.uiScale = static_cast<int>(std::lround(value));
-        }
-        saveGlobalConfig(p); // new instances open at the last chosen size
-        requestUiResize(p);
+}
+
+// Corner grip drag: every step asks the host for the new window size; the
+// end of the drag also tells the host (so the project counts as changed)
+// and remembers the scale for new instances.
+void setEditorScale(Plugin* p, double scale, bool dragEnded) {
+    scale = std::clamp(scale, kUiScaleMin, kUiScaleMax);
+    p->params.values[kParamUiScale].store(scale);
+    requestUiResize(p);
+    if (!dragEnded) return;
+    p->params.guiValueDirty[kParamUiScale].store(true);
+    requestParamFlush(p);
+    {
+        std::lock_guard<std::mutex> lock(p->params.guiState.mutex);
+        p->params.guiState.uiScale = scale;
     }
+    saveGlobalConfig(p);
 }
 
 void collectGarbage(Plugin* p) {
@@ -210,14 +224,14 @@ void loadGlobalConfig(Plugin* p) {
         if (line.rfind("lastdir=", 0) == 0) gs.lastDir = line.substr(8);
         else if (line.rfind("defaultsf=", 0) == 0) gs.defaultSoundFont = line.substr(10);
         else if (line.rfind("editor=", 0) == 0) gs.externalEditor = line.substr(7);
-        else if (line.rfind("uiscale=", 0) == 0)
-            gs.uiScale = std::clamp(atoi(line.c_str() + 8), 0, kNumUiScales - 1);
+        else if (line.rfind("uiscale=", 0) == 0 && line.find('.') != std::string::npos)
+            gs.uiScale = std::clamp(strtod(line.c_str() + 8, nullptr), kUiScaleMin, kUiScaleMax);
     }
 }
 
 void saveGlobalConfig(Plugin* p) {
     std::string editor, lastDir, defaultSf;
-    int uiScale = 0;
+    double uiScale = 1.0;
     {
         std::lock_guard<std::mutex> lock(p->params.guiState.mutex);
         editor = p->params.guiState.externalEditor;
@@ -233,7 +247,7 @@ void saveGlobalConfig(Plugin* p) {
     out << "editor=" << editor << "\n";
     if (!lastDir.empty()) out << "lastdir=" << lastDir << "\n";
     if (!defaultSf.empty()) out << "defaultsf=" << defaultSf << "\n";
-    if (uiScale != 0) out << "uiscale=" << uiScale << "\n";
+    if (uiScale != 1.0) out << "uiscale=" << std::fixed << std::setprecision(3) << uiScale << "\n";
 }
 
 // ------------------------------------------------------------ loading
@@ -551,8 +565,7 @@ bool paramsGetInfo(const clap_plugin_t*, uint32_t index, clap_param_info_t* info
     if (pi.stepped) info->flags |= CLAP_PARAM_IS_STEPPED;
     if (pi.id == kParamInterpolation || pi.id == kParamRenderInterpolation ||
         pi.id == kParamMidiMode || pi.id == kParamVoiceMode ||
-        pi.id == kParamReverbEngine || pi.id == kParamPortamentoTimeMode ||
-        pi.id == kParamUiScale)
+        pi.id == kParamReverbEngine || pi.id == kParamPortamentoTimeMode)
         info->flags |= CLAP_PARAM_IS_ENUM;
     // A view setting, not sound: kept in the state, kept out of hosts' lists.
     if (pi.id == kParamUiScale) info->flags |= CLAP_PARAM_IS_HIDDEN;
@@ -579,12 +592,6 @@ bool paramsValueToText(const clap_plugin_t*, clap_id id, double value, char* out
 
 bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text, double* out) {
     if (id >= kNumParams || !text) return false;
-    if (id == kParamUiScale) // names that start with a number ("75%")
-        for (int i = 0; i < kNumUiScales; ++i)
-            if (!platform::strCaseCmp(text, kUiScaleNames[i])) {
-                *out = i;
-                return true;
-            }
     char* end = nullptr;
     double v = strtod(text, &end);
     if (end == text) {
@@ -602,12 +609,13 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text, doubl
         else if (id == kParamRenderInterpolation) ok = match(kRenderInterpNames, kNumInterpModes + 1);
         else if (id == kParamReverbEngine) ok = match(kReverbEngineNames, kNumReverbEngines);
         else if (id == kParamPortamentoTimeMode) ok = match(kPortaTimeModeNames, 3);
-        else if (id == kParamUiScale) ok = match(kUiScaleNames, kNumUiScales);
         else if (id == kParamMidiMode) ok = match(kMidiModeNames, 2);
         else if (id == kParamVoiceMode) ok = match(kVoiceModeNames, 3);
         else if (!platform::strCaseCmp(text, "on")) { v = 1; ok = true; }
         else if (!platform::strCaseCmp(text, "off")) { v = 0; ok = true; }
         if (!ok) return false;
+    } else if (id == kParamUiScale && strchr(text, '%')) {
+        v /= 100.0; // "125%"
     } else if (id == kParamGain && strstr(text, "dB")) {
         v = std::pow(10.0, v / 20.0);
     } else if ((id == kParamEnvAttack || id == kParamEnvHold || id == kParamEnvDecay ||
@@ -690,7 +698,8 @@ const clap_plugin_params_t kExtParams = {
 
 constexpr uint32_t kStateMagic = 0x4C505346; // "FSPL"
 // 2: envelope A/D/S/R are absolute (seconds / dB), no longer multipliers.
-constexpr uint32_t kStateVersion = 2;
+// 3: kParamUiScale is a scale factor (in 2 it was an index: 0 = 100%, 1 = 75%).
+constexpr uint32_t kStateVersion = 3;
 
 bool streamWriteAll(const clap_ostream_t* s, const void* data, uint64_t size) {
     const auto* ptr = static_cast<const uint8_t*>(data);
@@ -771,7 +780,7 @@ bool stateLoad(const clap_plugin_t* plugin, const clap_istream_t* stream) {
     // older state fall back to their defaults.
     std::array<double, kNumParams> values;
     for (uint32_t i = 0; i < kNumParams; ++i) values[i] = kParamInfos[i].def;
-    bool hasReverbEngine = false;
+    bool hasReverbEngine = false, hasUiScale = false;
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t id = 0;
         double v = 0.0;
@@ -779,10 +788,13 @@ bool stateLoad(const clap_plugin_t* plugin, const clap_istream_t* stream) {
         if (id < kNumParams && std::isfinite(v))
             values[id] = std::clamp(v, kParamInfos[id].min, kParamInfos[id].max);
         hasReverbEngine |= id == kParamReverbEngine;
+        hasUiScale |= id == kParamUiScale;
     }
     // Saved before FluidSynth 2.6 support: those projects were mixed with
     // 2.5's only reverb, FDN - keep it instead of 2.6's new default.
     if (!hasReverbEngine) values[kParamReverbEngine] = kReverbEngineFdn;
+    if (version == 2 && hasUiScale) // the clamp above made index 0 into 0.75
+        values[kParamUiScale] = values[kParamUiScale] < 0.9 ? 1.0 : 0.75;
     // Version 1 stored envelope multipliers/dB shifts relative to each
     // preset, which have no absolute equivalent: start from the defaults.
     if (version < 2)
@@ -822,7 +834,7 @@ bool stateLoad(const clap_plugin_t* plugin, const clap_istream_t* stream) {
         buildAndPublish(p, {path, settings, false});
     }
     if (p->hostParams && p->hostParams->rescan) p->hostParams->rescan(p->host, CLAP_PARAM_RESCAN_VALUES);
-    requestUiResize(p); // the project's own UI Size, if the editor is open
+    requestUiResize(p); // the project's own editor size, if the editor is open
     return true;
 }
 
@@ -907,6 +919,7 @@ EditorCallbacks makeEditorCallbacks(Plugin* p) {
         setDefaultSoundFont(p, path);
     };
     cb.setParam = [p](ParamId id, double v) { setParamFromUi(p, id, v); };
+    cb.setEditorScale = [p](double scale, bool dragEnded) { setEditorScale(p, scale, dragEnded); };
     cb.beginGesture = [p](ParamId id) {
         p->params.guiGestureBegin[id].store(true);
         requestParamFlush(p);
@@ -970,20 +983,26 @@ bool guiCanResize(const clap_plugin_t*) { return true; }
 bool guiGetResizeHints(const clap_plugin_t*, clap_gui_resize_hints_t* hints) {
     hints->can_resize_horizontally = true;
     hints->can_resize_vertically = true;
-    hints->preserve_aspect_ratio = false;
+    hints->preserve_aspect_ratio = true;
+    hints->aspect_ratio_width = kDefaultW;
+    hints->aspect_ratio_height = kDefaultH;
     return true;
 }
 
 bool guiAdjustSize(const clap_plugin_t*, uint32_t* w, uint32_t* h) {
-    // The panel scales uniformly; below half size it stops being usable.
-    *w = std::max<uint32_t>(*w, kDefaultW / 2);
-    *h = std::max<uint32_t>(*h, kDefaultH / 2);
+    // The panel scales uniformly: the largest size of its aspect that fits,
+    // between 75% (smaller stops being readable) and 200%.
+    scaledSize(std::min(double(*w) / kDefaultW, double(*h) / kDefaultH), *w, *h);
     return true;
 }
 
 bool guiSetSize(const clap_plugin_t* plugin, uint32_t w, uint32_t h) {
     Plugin* p = self(plugin);
     if (p->window) p->window->setSize(w, h);
+    // The host's own resizing (e.g. REAPER's window corner) is the same
+    // setting as the grip: saved with the project.
+    p->params.values[kParamUiScale].store(
+        std::clamp(double(w) / kDefaultW, kUiScaleMin, kUiScaleMax));
     return true;
 }
 
@@ -1042,7 +1061,7 @@ bool plugInit(const clap_plugin_t* plugin) {
         p->host->get_extension(p->host, CLAP_EXT_PARAMS));
     p->hostGui = static_cast<const clap_host_gui_t*>(p->host->get_extension(p->host, CLAP_EXT_GUI));
     loadGlobalConfig(p);
-    // A new instance opens at the last UI Size chosen (a restored project
+    // A new instance opens at the last editor scale set (a restored project
     // brings its own value with its state).
     p->params.values[kParamUiScale].store(p->params.guiState.uiScale);
     p->loaderThread = std::thread(loaderMain, p);
@@ -1288,8 +1307,15 @@ void plugOnMainThread(const clap_plugin_t* plugin) {
         uiScaledSize(p, w, h);
         // An accepted request needn't be followed by set_size from the host
         // (clap.gui), so the window follows on its own.
-        if (p->hostGui && p->hostGui->request_resize && p->hostGui->request_resize(p->host, w, h))
+        if (p->hostGui && p->hostGui->request_resize && p->hostGui->request_resize(p->host, w, h)) {
             p->window->setSize(w, h);
+        } else {
+            // Host refused (or can't): keep the scale matching the window.
+            uint32_t cw, ch;
+            p->window->getSize(cw, ch);
+            p->params.values[kParamUiScale].store(
+                std::clamp(double(cw) / kDefaultW, kUiScaleMin, kUiScaleMax));
+        }
     }
 }
 

@@ -1022,21 +1022,31 @@ int main(int argc, char** argv) {
         CHECK(run_blocks(plug, 10) > 0.001, "plays after reloading state while active");
     }
 
-    /* 5b) UI Size (param 44): the editor size follows it - before the editor
-     * exists (get_size), and with it open a state load asks the host for the
-     * new size from the main thread (request_callback -> on_main_thread). */
+    /* 5b) UI Scale (param 44, 0.75..2): the editor size follows it - before
+     * the editor exists (get_size), and with it open a state load asks the
+     * host for the new size from the main thread (request_callback ->
+     * on_main_thread). The host's own resizing keeps the aspect, 75%..200%. */
     {
         const clap_plugin_gui_t* gui =
             (const clap_plugin_gui_t*)plug->get_extension(plug, CLAP_EXT_GUI);
         const uint32_t ids[1] = {44};
-        const double size75[1] = {1}, size100[1] = {0};
+        const double size75[1] = {0.75}, size100[1] = {1.0};
         MemStream ms;
         build_state_params(&ms, sfPath, ids, size75, 1);
         clap_istream_t is = {.ctx = &ms, .read = mem_read};
         state->load(plug, &is);
         uint32_t w = 0, h = 0;
         if (gui) gui->get_size(plug, &w, &h);
-        CHECK(w == 420 && h == 438, "UI Size 75%%: editor opens at %ux%u", w, h);
+        CHECK(w == 420 && h == 438, "UI Scale 75%%: editor opens at %ux%u", w, h);
+        if (gui) {
+            uint32_t aw = 300, ah = 300, bw = 5000, bh = 5000, cw = 1000, ch = 700;
+            gui->adjust_size(plug, &aw, &ah);
+            gui->adjust_size(plug, &bw, &bh);
+            gui->adjust_size(plug, &cw, &ch);
+            CHECK(aw == 420 && ah == 438 && bw == 1120 && bh == 1168 && cw == 671 && ch == 700,
+                  "host resizing: 300x300 -> %ux%u (min 75%%), 5000x5000 -> %ux%u (max 200%%), "
+                  "1000x700 -> %ux%u (aspect)", aw, ah, bw, bh, cw, ch);
+        }
 #ifdef _WIN32
         const int canShowGui = 1;
 #else
@@ -1051,24 +1061,24 @@ int main(int argc, char** argv) {
             if (g_callback_requested) plug->on_main_thread(plug);
             gui->get_size(plug, &w, &h);
             CHECK(g_resize_w == 560 && g_resize_h == 584 && w == 560 && h == 584,
-                  "UI Size back to 100%% with the editor open: host asked for %ux%u, editor %ux%u",
+                  "UI Scale back to 100%% with the editor open: host asked for %ux%u, editor %ux%u",
                   g_resize_w, g_resize_h, w, h);
             gui->destroy(plug);
         } else {
             printf("  info no display: open-editor resize not checked\n");
         }
         InEvents in = {.count = 0};
-        add_param(&in, 0, 44, 0);
+        add_param(&in, 0, 44, 1.0);
         run_block(plug, &in, NULL);
     }
 
     if (wantGui) {
         const clap_plugin_gui_t* gui =
             (const clap_plugin_gui_t*)plug->get_extension(plug, CLAP_EXT_GUI);
-        /* MINI_HOST_UI_SIZE=0|1 opens the editor at 100/75% */
-        if (getenv("MINI_HOST_UI_SIZE")) {
+        /* MINI_HOST_UI_SCALE=<0.75..2> opens the editor at that scale */
+        if (getenv("MINI_HOST_UI_SCALE")) {
             InEvents in = {.count = 0};
-            add_param(&in, 0, 44, atoi(getenv("MINI_HOST_UI_SIZE")));
+            add_param(&in, 0, 44, atof(getenv("MINI_HOST_UI_SCALE")));
             run_block(plug, &in, NULL);
         }
         if (gui && gui->is_api_supported(plug, GUI_API, false) &&
@@ -1093,6 +1103,10 @@ int main(int argc, char** argv) {
             run_block(plug, &in, NULL);
             for (int i = 0; i < guiSeconds * 94; ++i) {
                 run_block(plug, NULL, NULL);
+                if (g_callback_requested) { /* e.g. the corner grip's resize requests */
+                    g_callback_requested = 0;
+                    plug->on_main_thread(plug);
+                }
                 wait_ms_pumping(10);
             }
             gui->destroy(plug);

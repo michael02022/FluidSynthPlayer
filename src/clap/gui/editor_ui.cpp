@@ -620,14 +620,6 @@ int stdStringResize(ImGuiInputTextCallbackData* data) {
 }
 
 void drawOptionsGeneral(SharedParams& params, EditorUIState& ui, const EditorCallbacks& cb) {
-    sectionHeader("Window");
-    paramCombo(params, cb, kParamUiScale, "UI size", kUiScaleNames, kNumUiScales);
-    rowLabel("");
-    ImGui::PushStyleColor(ImGuiCol_Text, kDimText);
-    ImGui::TextWrapped("For DAWs that can't resize plugin windows. Saved with the project; new "
-                       "instances open at the last size chosen.");
-    ImGui::PopStyleColor();
-
     sectionHeader("Default SoundFont");
     {
         std::string def, current;
@@ -1161,6 +1153,46 @@ void drawOptionsPopup(SharedParams& params, EditorUIState& ui, const EditorCallb
 
 } // namespace
 
+// Bottom-right corner grip: drag to resize the whole editor (uniform scale,
+// 75%..200%). Works in hosts that can't resize plugin windows themselves -
+// the plugin asks the host for the new size (clap.gui request_resize /
+// VST3 resizeView).
+void drawResizeGrip(SharedParams& params, EditorUIState& ui, const EditorCallbacks& cb,
+                    const Layout& L) {
+    const ImGuiIO& io = ImGui::GetIO();
+    const float g = std::round(18.f * L.s);
+    const ImVec2 corner = io.DisplaySize;
+    ImGui::SetCursorScreenPos(ImVec2(corner.x - g, corner.y - g));
+    ImGui::InvisibleButton("##resize", ImVec2(g, g));
+    const bool hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
+    if (hot) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
+    if (ImGui::IsItemActivated()) {
+        ui.resizeGrabX = corner.x - io.MousePos.x;
+        ui.resizeGrabY = corner.y - io.MousePos.y;
+    }
+    if (ImGui::IsItemActive() && cb.setEditorScale) {
+        // The larger of the two axes, so a diagonal drag feels natural.
+        const double s = std::clamp(
+            std::max(double(io.MousePos.x + ui.resizeGrabX) / kEditorDesignW,
+                     double(io.MousePos.y + ui.resizeGrabY) / kEditorDesignH),
+            kUiScaleMin, kUiScaleMax);
+        if (std::fabs(s - params.get(kParamUiScale)) * kEditorDesignW >= 2.0)
+            cb.setEditorScale(s, false);
+    }
+    if (ImGui::IsItemDeactivated() && cb.setEditorScale)
+        cb.setEditorScale(params.get(kParamUiScale), true);
+
+    // Three diagonal ridges, like a window's size grip.
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImU32 col = hot ? kColAccent : kColTextDim;
+    const float t = std::max(1.f, L.s * 1.5f);
+    for (int i = 1; i <= 3; ++i) {
+        const float d = g * 0.27f * i;
+        dl->AddLine(ImVec2(corner.x - d - 2.f, corner.y - 2.f), ImVec2(corner.x - 2.f, corner.y - d - 2.f),
+                    col, t);
+    }
+}
+
 void drawEditorUI(SharedParams& params, EditorUIState& ui, const EditorCallbacks& cb) {
     if (ui.themedContext != ImGui::GetCurrentContext()) {
         ui.themedContext = ImGui::GetCurrentContext();
@@ -1274,6 +1306,7 @@ void drawEditorUI(SharedParams& params, EditorUIState& ui, const EditorCallbacks
         }
     }
     drawOptionsPopup(params, ui, cb, L, presets);
+    drawResizeGrip(params, ui, cb, L);
 
     ImGui::End();
     drawToast(params, L);

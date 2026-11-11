@@ -71,9 +71,11 @@ single compact panel (560x584, scales when resized):
   tune, Poly/Mono/Legato, portamento, polyphony, interpolation, the raw
   FluidSynth settings of the original plugin, SoundFont info and the
   FluidSynth log.
-- **UI size** (Options > General): 100% or 75% of the panel, for DAWs that
-  can't resize plugin windows (the plugin asks the host for the new size);
-  saved with the project, and new instances open at the last size chosen.
+- **Resizing**: drag the grip in the bottom-right corner (75% to 200% of
+  the panel, aspect kept) - works in DAWs that can't resize plugin windows
+  themselves, as the plugin asks the host for the new size. The DAW's own
+  resizing is limited the same way. Saved with the project; new instances
+  open at the last size set with the grip.
 - Every control is a CLAP parameter (automation, gestures, text entry);
   MIDI events are placed sample-accurately as in the original plugin.
 - **Restore MIDI controllers** (Options): some SoundFonts - e.g. converted

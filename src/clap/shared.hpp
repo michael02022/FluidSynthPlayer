@@ -100,8 +100,9 @@ enum ParamId : uint32_t {
     // ENVELOPE panel's H fader (added after the others: ids never move).
     kParamEnvHold,
 
-    // Editor size: 100% / 75% of the design size, for hosts without
-    // free plugin window resizing. Saved with the project, hidden from hosts.
+    // Editor scale (1 = the 560x584 design size), set with the corner grip
+    // or by the host's own window resizing. Saved with the project, hidden
+    // from hosts.
     kParamUiScale,
 
     kNumParams
@@ -149,9 +150,7 @@ inline constexpr int kReverbEngineFdn = 1;
 inline constexpr const char* kPortaTimeModeNames[3] = {"Auto (7/14-bit)", "XG/GS (7-bit CC5)",
                                                        "Linear (14-bit CC5+37)"};
 inline constexpr const char* kMidiModeNames[2] = {"Omni (single patch)", "Multitimbral (GM)"};
-inline constexpr int kNumUiScales = 2;
-inline constexpr const char* kUiScaleNames[kNumUiScales] = {"100%", "75%"};
-inline constexpr double kUiScaleFactors[kNumUiScales] = {1.0, 0.75};
+inline constexpr double kUiScaleMin = 0.75, kUiScaleMax = 2.0;
 inline constexpr const char* kVoiceModeNames[3] = {"Poly", "Mono", "Legato"};
 
 struct ParamInfo {
@@ -228,7 +227,7 @@ inline constexpr ParamInfo kParamInfos[kNumParams] = {
     {kParamRenderInterpolation, "Render Interpolation", "Settings", 0.0, double(kNumInterpModes),
      double(kNumInterpModes), true, false},
     {kParamEnvHold, "Hold", "Envelope", 0.0, 20.0, 0.0, false, true},
-    {kParamUiScale, "UI Size", "Settings", 0.0, double(kNumUiScales - 1), 0.0, true, false},
+    {kParamUiScale, "UI Scale", "Settings", kUiScaleMin, kUiScaleMax, 1.0, false, false},
 };
 
 // Standard SF2 default modulators (SF2.01 section 8.4) a SoundFont can
@@ -370,9 +369,9 @@ struct SharedParams {
         // applied when the host restores a saved state (see plugin.cpp's
         // maybeLoadDefaultSoundFont).
         std::string defaultSoundFont;
-        // UI Size (kParamUiScale index) a brand-new instance opens with: the
-        // last one chosen in any instance.
-        int uiScale = 0;
+        // Editor scale a brand-new instance opens with: the last one set with
+        // the corner grip in any instance.
+        double uiScale = 1.0;
 
         // Toast message (errors and notices) with its timestamp, auto-
         // dismissed by editor_ui.cpp's drawToast.

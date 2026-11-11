@@ -100,7 +100,8 @@ std::string formatParamValue(ParamId id, double value) {
         case kParamPortamentoTimeMode:
             return kPortaTimeModeNames[iv < 0 ? 0 : iv > 2 ? 2 : iv];
         case kParamUiScale:
-            return kUiScaleNames[iv < 0 ? 0 : iv >= kNumUiScales ? kNumUiScales - 1 : iv];
+            snprintf(buf, sizeof(buf), "%.0f%%", value * 100.0);
+            break;
         case kParamLimiterCeiling:
             snprintf(buf, sizeof(buf), "%.1f dB", value);
             break;

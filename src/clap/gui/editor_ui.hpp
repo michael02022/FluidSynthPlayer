@@ -19,6 +19,9 @@
 // GUI-thread-only interactive state - never touched by the audio thread.
 struct EditorUIState {
     char presetFilter[128] = {};
+    // Corner grip drag: pointer offset from the window's bottom-right corner
+    // when the drag started, so the corner follows the pointer exactly.
+    float resizeGrabX = 0.f, resizeGrabY = 0.f;
     // Multitimbral mode: which channel (0-15) the patch browser assigns to.
     int browserChannel = 0;
     // Set when a new SoundFont finished loading / the browser opens, so the
@@ -54,6 +57,10 @@ struct EditorCallbacks {
     std::function<void(ParamId, double)> setParam;
     std::function<void(ParamId)> beginGesture;
     std::function<void(ParamId)> endGesture;
+
+    // Corner grip: new editor scale (1 = design size) while dragging;
+    // dragEnded on release.
+    std::function<void(double scale, bool dragEnded)> setEditorScale;
 };
 
 void drawEditorUI(SharedParams& params, EditorUIState& ui, const EditorCallbacks& cb);
