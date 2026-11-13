@@ -10,7 +10,7 @@
 # their own build in buildSetup/CMakeLists.txt; this file only builds the
 # CLAP plugin and its test host.
 cmake_minimum_required(VERSION 3.24) # signalsmith (FluidSynth 2.6 reverb/limiter) needs it
-project(FluidSynthPlayer VERSION 0.1.0 LANGUAGES C CXX)
+project(FluidSynthPlayer VERSION 0.1.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -271,6 +271,11 @@ if(FSP_BUILD_VST3)
     BUNDLE_IDENTIFIER "com.michael02022.fluidsynthplayer.vst3"
     BUNDLE_VERSION "${PROJECT_VERSION}"
   )
+  # The binary inside the bundle must be named exactly like the bundle
+  # (Contents/x86_64-win/FluidSynthPlayer.vst3) or hosts skip it; MinGW's
+  # default "lib" module prefix would break that, and clap-wrapper only
+  # clears it on Linux.
+  set_target_properties(fluidsynthplayer_vst3 PROPERTIES PREFIX "")
 endif()
 
 # ---------------------------------------------------------------- test host

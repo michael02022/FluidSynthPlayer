@@ -180,9 +180,10 @@ cmake -G Ninja -B build-win -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -D
 cmake --build build-win
 ```
 
-Distribution zip (`dist/FluidSynthPlayer-<version>-windows-x64.zip`, with a
-README.txt and the licenses of every statically linked component, including
-libsndfile and its codecs when built with vcpkg):
+Distribution zip (`dist/FluidSynthPlayer-<version>-windows-x64.zip`: the
+plugin in `CLAP/` and the VST3 bundle in `VST3/`, a README.txt and the
+licenses of every statically linked component, including libsndfile and its
+codecs when built with vcpkg):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -BuildDir build-win-sf3

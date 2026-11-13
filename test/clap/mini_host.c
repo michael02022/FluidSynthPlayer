@@ -57,6 +57,16 @@ static char* make_temp_dir(char* buf, size_t size) {
     return make_dir(buf) == 0 ? buf : NULL;
 }
 /* A real host embeds the editor in a window of its own: do the same. */
+static HWND g_parent_window = NULL;
+static const DWORD kParentStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
+/* Accepted clap.gui resize requests resize the parent too, like a DAW. */
+static void resize_parent_window(uint32_t w, uint32_t h) {
+    if (!g_parent_window) return;
+    RECT r = {0, 0, (LONG)w, (LONG)h};
+    AdjustWindowRect(&r, kParentStyle, FALSE);
+    SetWindowPos(g_parent_window, NULL, 0, 0, r.right - r.left, r.bottom - r.top,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
 static HWND create_parent_window(uint32_t w, uint32_t h) {
     WNDCLASSA wc = {0};
     wc.lpfnWndProc = DefWindowProcA;
@@ -65,12 +75,12 @@ static HWND create_parent_window(uint32_t w, uint32_t h) {
     wc.lpszClassName = "mini_host_parent";
     RegisterClassA(&wc);
     RECT r = {0, 0, (LONG)w, (LONG)h};
-    const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
-    AdjustWindowRect(&r, style, FALSE);
-    HWND hwnd = CreateWindowA("mini_host_parent", "mini_host - FluidSynthPlayer", style,
+    AdjustWindowRect(&r, kParentStyle, FALSE);
+    HWND hwnd = CreateWindowA("mini_host_parent", "mini_host - FluidSynthPlayer", kParentStyle,
                               CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
                               NULL, NULL, wc.hInstance, NULL);
     ShowWindow(hwnd, SW_SHOW);
+    g_parent_window = hwnd;
     return hwnd;
 }
 #else
@@ -135,6 +145,9 @@ static bool host_gui_request_resize(const clap_host_t* h, uint32_t w, uint32_t h
     (void)h;
     g_resize_w = w;
     g_resize_h = hh;
+#ifdef _WIN32
+    resize_parent_window(w, hh);
+#endif
     return true;
 }
 static bool host_gui_request_show(const clap_host_t* h) { (void)h; return false; }
@@ -1112,6 +1125,7 @@ int main(int argc, char** argv) {
             gui->destroy(plug);
 #ifdef _WIN32
             DestroyWindow(parent);
+            g_parent_window = NULL;
 #endif
             printf("gui destroyed\n");
         } else {

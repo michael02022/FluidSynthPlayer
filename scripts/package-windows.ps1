@@ -1,6 +1,8 @@
-# Packs a Windows build of the CLAP plugin into a distribution zip:
+# Packs a Windows build of the plugin into a distribution zip:
 #   dist/FluidSynthPlayer-<version>-windows-x64.zip
-#     FluidSynthPlayer.clap, README.txt, LICENSE.txt, licenses/...
+#     CLAP/FluidSynthPlayer.clap
+#     VST3/FluidSynthPlayer.vst3/   (bundle folder; when FSP_BUILD_VST3 built it)
+#     README.txt, LICENSE.txt, licenses/...
 #
 # Build first (see README.md, "Windows"), then from the repository root:
 #   powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 [-BuildDir build-win]
@@ -18,6 +20,11 @@ Set-Location $root
 $clap = @("$BuildDir\FluidSynthPlayer.clap", "$BuildDir\Release\FluidSynthPlayer.clap") |
     Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $clap) { throw "FluidSynthPlayer.clap not found in $BuildDir - build it first." }
+# clap-wrapper puts the VST3 bundle under <build>/<config>/ (Release for
+# single-config generators too).
+$vst3 = @("$BuildDir\Release\FluidSynthPlayer.vst3", "$BuildDir\FluidSynthPlayer.vst3") |
+    Where-Object { Test-Path "$_\Contents\x86_64-win\FluidSynthPlayer.vst3" } | Select-Object -First 1
+if (-not $vst3) { Write-Warning "No VST3 bundle in $BuildDir (FSP_BUILD_VST3=OFF?): packaging the CLAP only." }
 
 $cmake = Get-Content CMakeLists.txt -Raw
 $version = [regex]::Match($cmake, 'project\(FluidSynthPlayer VERSION ([0-9.]+)').Groups[1].Value
@@ -34,12 +41,18 @@ $stage = Join-Path $OutDir $name
 $zip = Join-Path $OutDir "$name.zip"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 if (Test-Path $zip) { Remove-Item -Force $zip }
-New-Item -ItemType Directory -Force "$stage\licenses" | Out-Null
+New-Item -ItemType Directory -Force "$stage\licenses", "$stage\CLAP" | Out-Null
 
-# ---- plugin (debug info stripped: MinGW builds carry it from static libs) ----
-Copy-Item $clap "$stage\FluidSynthPlayer.clap"
+# ---- plugins (debug info stripped: MinGW builds carry it from static libs) ----
 $strip = Get-Command strip -ErrorAction SilentlyContinue
-if ($strip) { & $strip.Source --strip-unneeded "$stage\FluidSynthPlayer.clap" }
+Copy-Item $clap "$stage\CLAP\FluidSynthPlayer.clap"
+$binaries = @("$stage\CLAP\FluidSynthPlayer.clap")
+if ($vst3) {
+    New-Item -ItemType Directory -Force "$stage\VST3" | Out-Null
+    Copy-Item -Recurse $vst3 "$stage\VST3\FluidSynthPlayer.vst3"
+    $binaries += "$stage\VST3\FluidSynthPlayer.vst3\Contents\x86_64-win\FluidSynthPlayer.vst3"
+}
+if ($strip) { foreach ($b in $binaries) { & $strip.Source --strip-unneeded $b } }
 
 # ---- licenses ----
 Copy-Item LICENSE.txt "$stage\LICENSE.txt"
@@ -54,6 +67,10 @@ $licenses = [ordered]@{
     "DearImGui-MIT.txt"                 = "external\imgui\LICENSE.txt"
     "FontAwesome-OFL-1.1.txt"           = "external\fontawesome\LICENSE-OFL.txt"
     "Roboto-Apache-2.0.txt"             = "external\roboto\LICENSE.txt"
+}
+if ($vst3) {
+    $licenses["clap-wrapper-MIT.txt"] = "external\clap-wrapper\LICENSE"
+    $licenses["VST3-SDK-MIT.txt"] = "external\vst3sdk\LICENSE.txt"
 }
 foreach ($k in $licenses.Keys) { Copy-Item $licenses[$k] "$stage\licenses\$k" }
 
@@ -92,8 +109,24 @@ $sf3Line = if ($hasSf3) {
 } else {
     "Formats: SF2 and DLS SoundFonts. This build has NO SF3 support (it was`r`n  built without libsndfile); SF3 files will not load."
 }
+$formats = if ($vst3) { "CLAP and VST3" } else { "CLAP" }
+$vst3Install = if ($vst3) { "`n`n" + @"
+VST3: copy the whole VST3\FluidSynthPlayer.vst3 folder (it is a bundle,
+keep its contents together) into the standard VST3 folder:
+
+    C:\Program Files\Common Files\VST3\
+"@ } else { "" }
+$vst3Licenses = if ($vst3) { ",`r`n  clap-wrapper (MIT) and the VST3 SDK (MIT) for the VST3" } else { "" }
+$hostLine = if ($vst3) {
+    "A DAW / host with CLAP support (e.g. REAPER, Bitwig Studio, FL Studio)`r`n  or VST3 support (e.g. Cubase, Ableton Live, Studio One)"
+} else { "A DAW / host with CLAP support (e.g. REAPER, Bitwig Studio, FL Studio)" }
+$bothNote = if ($vst3) { "`n" + @"
+CLAP and VST3 are the same instrument: in a DAW that supports both, use
+either one (CLAP preferred where available).
+"@ } else { "" }
+$vst3Trademark = if ($vst3) { "`n`nVST is a registered trademark of Steinberg Media Technologies GmbH." } else { "" }
 $readme = @"
-FluidSynth Player $version - CLAP plugin for Windows (x64)
+FluidSynth Player $version - $formats plugin for Windows (x64)
 =========================================================
 
 SoundFont player instrument based on FluidSynth 2.6 (statically linked),
@@ -105,23 +138,23 @@ commit $commit$dirty.
 Requirements
 ------------
 - Windows 10 or 11, 64-bit
-- A DAW / host with CLAP support (e.g. REAPER, Bitwig Studio, FL Studio)
+- $hostLine
 - OpenGL 1.1 (any graphics driver)
-No other DLLs or runtimes are needed: FluidSynthPlayer.clap is self-contained.
+No other DLLs or runtimes are needed: each plugin file is self-contained.$bothNote
 
 Installation
 ------------
-Copy FluidSynthPlayer.clap into one of the standard CLAP folders, then let
-the DAW rescan its plugins:
+CLAP: copy CLAP\FluidSynthPlayer.clap into one of the standard CLAP
+folders:
 
   All users (needs administrator rights):
     C:\Program Files\Common Files\CLAP\
 
   Current user only:
-    %LOCALAPPDATA%\Programs\Common\CLAP\
+    %LOCALAPPDATA%\Programs\Common\CLAP\$vst3Install
 
-Close the DAW before replacing an older version (a loaded plugin file is
-locked by Windows).
+Then let the DAW rescan its plugins. Close the DAW before replacing an
+older version (a loaded plugin file is locked by Windows).
 
 Usage notes
 -----------
@@ -139,12 +172,12 @@ FluidSynth Player is MIT licensed (LICENSE.txt). It contains third-party
 components under their own licenses (see the licenses folder):
   FluidSynth (LGPL 2.1), gcem (Apache 2.0), Signalsmith libraries (MIT,
   0BSD), CLAP (MIT), Dear ImGui (MIT), Font Awesome 4 font (SIL OFL 1.1),
-  Roboto font (Apache 2.0).
+  Roboto font (Apache 2.0)$vst3Licenses.
 
 FluidSynth is linked statically. As required by the LGPL, the complete
 source code - including FluidSynth (external/fluidsynth) and the build
 scripts needed to rebuild/relink the plugin against a modified FluidSynth -
-is available at the repository and commit given above.$sndfileNotice
+is available at the repository and commit given above.$sndfileNotice$vst3Trademark
 "@
 # CRLF line endings for Notepad users.
 [System.IO.File]::WriteAllText((Join-Path (Resolve-Path $stage) "README.txt"), ($readme -replace "`r?`n", "`r`n"))
@@ -152,4 +185,4 @@ is available at the repository and commit given above.$sndfileNotice
 # ---- zip (Windows' bsdtar writes standard zips with "/" separators) ----
 & "$env:SystemRoot\System32\tar.exe" -a -c -f $zip -C $OutDir $name
 if ($LASTEXITCODE -ne 0) { throw "tar failed" }
-Write-Host "Created $zip (SF3 support: $hasSf3)"
+Write-Host "Created $zip ($formats, SF3 support: $hasSf3)"
