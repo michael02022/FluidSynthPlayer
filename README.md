@@ -34,13 +34,15 @@ Those components are currently available - as x86_64 versions - for Windows and 
 
 All the code is open-source; hence you can check and adapt it to your needs.
 
-## CLAP Plugin with ImGui Interface (Linux and Windows)
+## CLAP / VST3 Plugin with ImGui Interface (Linux and Windows)
 
 Besides the original JUCE-based VST3/AU plugin, this fork contains a
-**JUCE-free CLAP plugin**, `FluidSynthPlayer.clap`, with a Dear ImGui
-interface over OpenGL2 - raw X11/GLX on Linux (the same GUI stack as the
-sibling projects SfzDrummer and SoloSampler), Win32/WGL on Windows - in a
-single compact panel (560x584, scales when resized):
+**JUCE-free CLAP plugin**, `FluidSynthPlayer.clap` - also built as
+`FluidSynthPlayer.vst3` from the same code (see *VST3* below) - with a Dear
+ImGui interface over OpenGL2 - raw X11/GLX on Linux (the same GUI stack as
+the sibling projects SfzDrummer and SoloSampler), Win32/WGL on Windows - in
+a single compact panel (560x584 at 100%, resizable from 75% to 200%). DAWs
+list it as an instrument of the *Sampler* category.
 
 ![FluidSynthPlayer CLAP plugin](./doc/clap/FluidSynthPlayer.png)
 
@@ -71,13 +73,19 @@ single compact panel (560x584, scales when resized):
   tune, Poly/Mono/Legato, portamento, polyphony, interpolation, the raw
   FluidSynth settings of the original plugin, SoundFont info and the
   FluidSynth log.
+- **Multitimbral mode**: each MIDI channel plays its own patch (bank select
+  and program change, or the channel table); the panel's ENVELOPE, LFO,
+  MISC and REVERB / CHORUS settings act on all 16 channels alike (the drum
+  channel included; Transpose leaves drum kits alone), while Bank/Patch,
+  Mono/Legato and portamento belong to channel 1.
 - **Resizing**: drag the grip in the bottom-right corner (75% to 200% of
   the panel, aspect kept) - works in DAWs that can't resize plugin windows
   themselves, as the plugin asks the host for the new size. The DAW's own
   resizing is limited the same way. Saved with the project; new instances
   open at the last size set with the grip.
-- Every control is a CLAP parameter (automation, gestures, text entry);
-  MIDI events are placed sample-accurately as in the original plugin.
+- Every control is a plugin parameter (CLAP and VST3: automation,
+  gestures, text entry); MIDI events are placed sample-accurately as in the
+  original plugin.
 - **Restore MIDI controllers** (Options): some SoundFonts - e.g. converted
   E-mu EMAX II libraries - redefine the standard SF2 modulators with zero
   amounts, which per the spec disables CC7 volume, CC10 pan, CC11
@@ -191,10 +199,19 @@ powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -BuildDir b
 
 Install by copying `FluidSynthPlayer.clap` into
 `C:\Program Files\Common Files\CLAP\` (all users) or
-`%LOCALAPPDATA%\Programs\Common\CLAP\` (current user). A libsndfile
-that is a DLL (e.g. MSYS2's) also works, but then it and its codec DLLs
-must be found by the *host* (next to the DAW's `.exe` or in `PATH`) - CMake
-warns about it; prefer a static one.
+`%LOCALAPPDATA%\Programs\Common\CLAP\` (current user), and/or the
+`FluidSynthPlayer.vst3` bundle into `C:\Program Files\Common Files\VST3\`
+or `%LOCALAPPDATA%\Programs\Common\VST3\` - or let the install script do
+it, from the repository or an extracted distribution zip (`-CurrentUser`
+needs no administrator rights):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1 [-CurrentUser]
+```
+
+A libsndfile that is a DLL (e.g. MSYS2's) also works, but then it and its
+codec DLLs must be found by the *host* (next to the DAW's `.exe` or in
+`PATH`) - CMake warns about it; prefer a static one.
 
 On Windows the editor is a child window running on the host's UI thread
 (redrawn from a timer), *Open...* uses the native file dialog, SoundFonts
@@ -216,8 +233,9 @@ SoundFont such as FluidR3_GM, e.g. `test\SimpleTestSoundfont.sf2` passes
 them all.
 
 The sources live in `src/clap/`; the vendored FluidSynth (LGPL-2.1),
-Signalsmith, CLAP headers, Dear ImGui, Font Awesome and Roboto (UI font,
-Apache 2.0) in `external/`.
+Signalsmith, CLAP headers, Dear ImGui, Font Awesome, Roboto (UI font,
+Apache 2.0), clap-wrapper (MIT, with `patches/clap-wrapper/` applied) and
+the VST3 SDK subset it needs (MIT) in `external/`.
 
 ## Installation
 
