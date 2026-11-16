@@ -144,6 +144,14 @@ cp build-clap/FluidSynthPlayer.clap ~/.clap/
 cp -r build-clap/Release/FluidSynthPlayer.vst3 ~/.vst3/   # VST3, optional
 ```
 
+The editor draws with OpenGL (GLX) when it gets a direct (local) OpenGL
+context. Otherwise - typically remote X sessions (ssh -X, VNC, xrdp, X2Go,
+VcXsrv/Xming), which offer no GLX or only indirect GLX, and whenever
+`LIBGL_ALWAYS_INDIRECT` is set - it is drawn in software instead
+(`src/clap/gui/imgui_soft_renderer.cpp`, sent with `XPutImage`, only the
+part that changed, at up to 30 fps); the reason is printed on stderr.
+`FLUIDSYNTHPLAYER_SOFTWARE_RENDER=1` in the DAW's environment forces it.
+
 Distribution zip (`dist/FluidSynthPlayer-<version>-linux-<arch>.zip`, with a
 README.txt and the licenses of every statically linked component; the
 plugin uses the system's libsndfile, and runs on the glibc version it was

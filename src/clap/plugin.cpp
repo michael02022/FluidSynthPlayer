@@ -958,7 +958,11 @@ bool guiCreate(const clap_plugin_t* plugin, const char* api, bool isFloating) {
         });
     uint32_t w, h;
     uiScaledSize(p, w, h);
-    return p->window->create(w, h);
+    if (!p->window->create(w, h)) { // e.g. no OpenGL on this display
+        p->window.reset();
+        return false;
+    }
+    return true;
 }
 
 void guiDestroy(const clap_plugin_t* plugin) {

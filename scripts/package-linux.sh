@@ -100,7 +100,10 @@ Requirements
 - $arch Linux with glibc $glibc or newer
 - A DAW / host with CLAP or VST3 support (e.g. REAPER, Bitwig Studio,
   Ardour)
-- X11 or XWayland, with OpenGL
+- X11 or XWayland. The editor uses OpenGL with a local (direct) OpenGL
+  context; otherwise (remote X sessions such as ssh -X or VcXsrv, or
+  LIBGL_ALWAYS_INDIRECT set) it is drawn in software. Set
+  FLUIDSYNTHPLAYER_SOFTWARE_RENDER=1 to force software drawing
 $sndfile_req
 - Optional: zenity, for the folder button's file dialog (drag & drop
   works without it)

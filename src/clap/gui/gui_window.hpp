@@ -71,6 +71,9 @@ private:
 
     std::thread thread_;
     std::atomic<bool> quit_{false};
+    // Draw with imgui_soft_renderer + XPutImage instead of OpenGL (no
+    // usable GLX on this display, or FLUIDSYNTHPLAYER_SOFTWARE_RENDER=1).
+    bool soft_ = false;
 
     // command mailbox, host -> GUI thread
     std::mutex cmdMutex_;

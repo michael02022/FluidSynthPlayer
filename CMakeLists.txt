@@ -10,7 +10,7 @@
 # their own build in buildSetup/CMakeLists.txt; this file only builds the
 # CLAP plugin and its test host.
 cmake_minimum_required(VERSION 3.24) # signalsmith (FluidSynth 2.6 reverb/limiter) needs it
-project(FluidSynthPlayer VERSION 0.1.1 LANGUAGES C CXX)
+project(FluidSynthPlayer VERSION 0.1.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -157,6 +157,7 @@ if(WIN32)
 else()
   set(FSP_PLATFORM_SOURCES
     src/clap/gui/gui_window_x11.cpp
+    src/clap/gui/imgui_soft_renderer.cpp # editor without OpenGL (remote X)
     src/clap/gui/file_dialog_zenity.cpp
   )
 endif()
